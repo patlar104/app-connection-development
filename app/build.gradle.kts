@@ -39,8 +39,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_21
     }
 
-    kotlinOptions {
-        jvmTarget = "21"
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget("21"))
+        }
     }
 
     buildFeatures {
@@ -61,7 +63,7 @@ dependencies {
 
     // Core Android
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
 
     // Compose
