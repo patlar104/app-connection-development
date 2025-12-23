@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AppConnect</string>
+    <string name="clipboard_sync_tile_label">Clipboard Sync</string>
+    <string name="accessibility_service_description">Allows AppConnect to sync clipboard content with your PC. This service monitors clipboard changes to enable seamless synchronization.</string>
+</resources>
+
