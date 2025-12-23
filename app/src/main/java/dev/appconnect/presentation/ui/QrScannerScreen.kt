@@ -105,7 +105,7 @@ fun QrScannerScreen(
             verticalArrangement = Arrangement.Center
         ) {
             Text("Camera permission required")
-            Button(onClick = { /* Request permission */ }) {
+            Button(onClick = { cameraPermissionState.launchPermissionRequest() }) {
                 Text("Grant Permission")
             }
         }

@@ -13,6 +13,7 @@ import dev.appconnect.R
 import dev.appconnect.core.NotificationManager
 import dev.appconnect.core.SyncManager
 import dev.appconnect.domain.model.ClipboardItem
+import dev.appconnect.domain.model.ContentType
 import dev.appconnect.network.BluetoothManager
 import dev.appconnect.network.Transport
 import dev.appconnect.network.WebSocketClient
@@ -38,6 +39,9 @@ class ClipboardSyncService : Service() {
 
     @Inject
     lateinit var notificationManager: NotificationManager
+
+    @Inject
+    lateinit var repository: dev.appconnect.data.repository.ClipboardRepository
 
     private var currentTransport: Transport = Transport.WEBSOCKET
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -100,7 +104,7 @@ class ClipboardSyncService : Service() {
                 val clipboardItem = ClipboardItem(
                     id = java.util.UUID.randomUUID().toString(),
                     content = text,
-                    contentType = dev.appconnect.domain.model.ContentType.TEXT,
+                    contentType = ContentType.TEXT,
                     timestamp = System.currentTimeMillis(),
                     ttl = 24 * 60 * 60 * 1000L, // 24 hours
                     synced = false,
@@ -123,17 +127,37 @@ class ClipboardSyncService : Service() {
 
     private fun setupWebSocketListener() {
         webSocketClient.setMessageListener { message ->
-            // Handle incoming WebSocket messages
-            // Parse and pass to SyncManager.handleIncomingClipboard
-            Timber.d("Received WebSocket message")
+            try {
+                val encryptedData = parseEncryptedMessage(message)
+                syncManager.handleIncomingClipboard(encryptedData)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to parse WebSocket message")
+            }
         }
     }
 
     private fun setupBluetoothListener() {
         bluetoothManager.setMessageListener { message ->
-            // Handle incoming Bluetooth messages
-            Timber.d("Received Bluetooth message")
+            try {
+                val encryptedData = parseEncryptedMessage(message)
+                syncManager.handleIncomingClipboard(encryptedData)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to parse Bluetooth message")
+            }
         }
+    }
+
+    private fun parseEncryptedMessage(message: String): dev.appconnect.core.encryption.EncryptedData {
+        val parts = message.split("|")
+        if (parts.size != 2) {
+            throw IllegalArgumentException("Invalid message format")
+        }
+        val iv = android.util.Base64.decode(parts[0], android.util.Base64.NO_WRAP)
+        val encryptedBytes = android.util.Base64.decode(parts[1], android.util.Base64.NO_WRAP)
+        return dev.appconnect.core.encryption.EncryptedData(
+            encryptedBytes = encryptedBytes,
+            iv = iv
+        )
     }
 
     private fun handleWebSocketFailure() {
@@ -142,9 +166,22 @@ class ClipboardSyncService : Service() {
 
         // Attempt Bluetooth connection
         serviceScope.launch {
-            // Note: Bluetooth connection requires device address
-            // This is a placeholder - actual implementation would use paired device info
-            val result = bluetoothManager.connect("00:00:00:00:00:00")
+            // Get paired device from repository
+            val pairedDevices = repository.getPairedDevices()
+            val device = pairedDevices.firstOrNull() ?: run {
+                Timber.e("No paired devices available for Bluetooth fallback")
+                stopSelf()
+                return@launch
+            }
+            
+            // Extract Bluetooth address from device info
+            val bluetoothAddress = device.bluetoothAddress ?: run {
+                Timber.e("Device has no Bluetooth address")
+                stopSelf()
+                return@launch
+            }
+            
+            val result = bluetoothManager.connect(bluetoothAddress)
             result.fold(
                 onSuccess = {
                     currentTransport = Transport.BLUETOOTH
@@ -167,7 +204,7 @@ class ClipboardSyncService : Service() {
         return NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
             .setContentTitle("Connected to PC")
             .setContentText("Sync active via ${transport.name}")
-            .setSmallIcon(android.R.drawable.ic_menu_share)
+            .setSmallIcon(R.drawable.ic_sync_tile)
             .setOngoing(true)
             .build()
     }

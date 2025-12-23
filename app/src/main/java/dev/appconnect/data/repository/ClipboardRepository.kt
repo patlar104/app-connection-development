@@ -138,7 +138,8 @@ private fun PairedDeviceEntity.toDomainModel(): Device {
         certificateFingerprint = certificateFingerprint,
         lastSeen = lastSeen,
         isTrusted = isTrusted,
-        cdmAssociationId = cdmAssociationId
+        cdmAssociationId = cdmAssociationId,
+        bluetoothAddress = bluetoothAddress
     )
 }
 
@@ -150,7 +151,8 @@ private fun Device.toEntity(): PairedDeviceEntity {
         certificateFingerprint = certificateFingerprint,
         lastSeen = lastSeen,
         isTrusted = isTrusted,
-        cdmAssociationId = cdmAssociationId
+        cdmAssociationId = cdmAssociationId,
+        bluetoothAddress = bluetoothAddress
     )
 }
 

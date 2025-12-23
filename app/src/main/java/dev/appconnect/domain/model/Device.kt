@@ -7,7 +7,8 @@ data class Device(
     val certificateFingerprint: String,
     val lastSeen: Long,
     val isTrusted: Boolean,
-    val cdmAssociationId: String?
+    val cdmAssociationId: String?,
+    val bluetoothAddress: String? = null
 )
 
 enum class Transport {

@@ -2,7 +2,6 @@ package dev.appconnect
 
 import android.app.Application
 import android.os.Build
-import androidx.annotation.RequiresApi
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
@@ -26,9 +25,7 @@ class AppConnectApplication : Application() {
         super.onCreate()
 
         // Initialize Timber
-        if (BuildConfig.DEBUG) {
-            Timber.plant(Timber.DebugTree())
-        }
+        Timber.plant(Timber.DebugTree())
 
         healthManager = HealthManager(this)
         crashReporter = CrashReporter(this)

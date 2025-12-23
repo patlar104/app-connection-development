@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.AppConnect" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- Base application theme for View system (dialogs, system UI) -->
+    <style name="Theme.AppConnect" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Customize theme attributes here -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+    
     <style name="Theme.AppConnect.Transparent" parent="Theme.AppConnect">
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowIsTranslucent">true</item>

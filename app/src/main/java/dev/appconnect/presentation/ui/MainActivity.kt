@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import dagger.hilt.android.AndroidEntryPoint
 import dev.appconnect.AppConnectApplication
 import dev.appconnect.domain.model.ExitReason
+import dev.appconnect.presentation.theme.AppConnectTheme
 import dev.appconnect.presentation.viewmodel.MainViewModel
 
 @AndroidEntryPoint
@@ -25,7 +26,7 @@ class MainActivity : ComponentActivity() {
         checkExitReason()
 
         setContent {
-            MaterialTheme {
+            AppConnectTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background

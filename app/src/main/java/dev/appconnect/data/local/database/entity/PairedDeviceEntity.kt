@@ -12,6 +12,7 @@ data class PairedDeviceEntity(
     val certificateFingerprint: String, // SHA-256 of X.509 cert
     val lastSeen: Long,
     val isTrusted: Boolean,
-    val cdmAssociationId: String?     // CDM association ID
+    val cdmAssociationId: String?,     // CDM association ID
+    val bluetoothAddress: String? = null
 )
 

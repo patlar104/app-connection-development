@@ -5,21 +5,17 @@ import android.content.Context
 import android.content.Intent
 import android.content.ClipData
 import android.content.ClipboardManager
-import dagger.hilt.android.AndroidEntryPoint
+import dagger.hilt.EntryPointAccessors
+import dev.appconnect.AppConnectApplication
 import dev.appconnect.core.NotificationManager
-import dev.appconnect.data.repository.ClipboardRepository
+import dev.appconnect.di.RepositoryEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import timber.log.Timber
-import javax.inject.Inject
 
-@AndroidEntryPoint
 class CopyActionReceiver : BroadcastReceiver() {
-
-    @Inject
-    lateinit var repository: ClipboardRepository
 
     private val receiverScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -29,6 +25,14 @@ class CopyActionReceiver : BroadcastReceiver() {
         }
 
         val clipboardId = intent.getStringExtra(NotificationManager.EXTRA_CLIPBOARD_ID) ?: return
+
+        // Get repository via EntryPointAccessors for BroadcastReceiver
+        val application = context.applicationContext as? AppConnectApplication ?: return
+        val entryPoint = EntryPointAccessors.fromApplication(
+            application,
+            RepositoryEntryPoint::class.java
+        )
+        val repository = entryPoint.clipboardRepository()
 
         receiverScope.launch {
             val item = repository.getClipboardItem(clipboardId) ?: run {
@@ -44,4 +48,3 @@ class CopyActionReceiver : BroadcastReceiver() {
         }
     }
 }
-

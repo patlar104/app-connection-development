@@ -25,7 +25,8 @@ class PairedDeviceTrustManager @Inject constructor(
         val serverCert = chain[0]
         val certFingerprint = calculateSha256Fingerprint(serverCert)
 
-        // Check if this fingerprint matches a paired device
+        // Note: Using runBlocking here is acceptable because SSL validation must be synchronous
+        // This is called during SSL handshake and cannot be suspended
         val pairedDevices = runBlocking {
             pairedDeviceDao.getTrustedDevices()
         }

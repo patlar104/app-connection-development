@@ -19,7 +19,7 @@ import javax.net.ssl.X509TrustManager
 
 @Singleton
 class WebSocketClient @Inject constructor(
-    private val pairedDeviceDao: PairedDeviceDao
+    private val trustManager: PairedDeviceTrustManager
 ) {
     private var webSocket: WebSocket? = null
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
@@ -33,9 +33,8 @@ class WebSocketClient @Inject constructor(
 
     fun connect(host: String, port: Int): Boolean {
         return try {
-            val trustManager = PairedDeviceTrustManager(pairedDeviceDao)
             val sslContext = SSLContext.getInstance("TLS").apply {
-                init(null, arrayOf<TrustManager>(trustManager), SecureRandom())
+                init(null, arrayOf<TrustManager>(trustManager as TrustManager), SecureRandom())
             }
 
             val client = OkHttpClient.Builder()

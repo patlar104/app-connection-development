@@ -1,17 +1,23 @@
 package dev.appconnect.domain.model
 
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
+
+@Serializable
 data class ClipboardItem(
-    val id: String,
-    val content: String,
-    val contentType: ContentType,
-    val timestamp: Long,
-    val ttl: Long,
-    val synced: Boolean,
-    val sourceDeviceId: String?,
-    val hash: String,
-    val previewText: String = content.take(50) // Preview for notifications
+    @SerialName("id") val id: String,
+    @SerialName("content") val content: String,
+    @SerialName("contentType") val contentType: ContentType,
+    @SerialName("timestamp") val timestamp: Long,
+    @SerialName("ttl") val ttl: Long,
+    @SerialName("synced") val synced: Boolean,
+    @SerialName("sourceDeviceId") val sourceDeviceId: String?,
+    @SerialName("hash") val hash: String,
+    @Transient val previewText: String = content.take(50) // Preview for notifications
 )
 
+@Serializable
 enum class ContentType {
     TEXT,
     IMAGE,

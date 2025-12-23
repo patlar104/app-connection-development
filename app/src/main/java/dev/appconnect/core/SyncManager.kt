@@ -11,6 +11,7 @@ import dev.appconnect.domain.model.ContentType
 import dev.appconnect.network.BluetoothManager
 import dev.appconnect.network.Transport
 import dev.appconnect.network.WebSocketClient
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -42,7 +43,7 @@ class SyncManager @Inject constructor(
 
     fun getCurrentTransport(): Transport = currentTransport
 
-    suspend fun syncClipboard(clipboardItem: ClipboardItem): Result<Boolean> {
+    suspend fun syncClipboard(clipboardItem: ClipboardItem): kotlin.Result<Boolean> {
         // Trap A: Images can only sync via WebSocket
         if (clipboardItem.contentType == ContentType.IMAGE && currentTransport == Transport.BLUETOOTH) {
             // Show toast and abort
@@ -52,7 +53,7 @@ class SyncManager @Inject constructor(
                 Toast.LENGTH_LONG
             ).show()
             Timber.w("Image sync attempted over Bluetooth - blocked")
-            return Result.failure(Exception("Image sync requires WebSocket transport"))
+            return kotlin.Result.failure(Exception("Image sync requires WebSocket transport"))
         }
 
         // Save to repository first (queue if connection is down)
@@ -66,9 +67,9 @@ class SyncManager @Inject constructor(
                     val message = serializeForTransmission(encrypted)
                     if (webSocketClient.send(message)) {
                         repository.markAsSynced(clipboardItem.id)
-                        Result.success(true)
+                        kotlin.Result.success(true)
                     } else {
-                        Result.failure(Exception("WebSocket send failed"))
+                        kotlin.Result.failure(Exception("WebSocket send failed"))
                     }
                 }
                 Transport.BLUETOOTH -> {
@@ -77,12 +78,12 @@ class SyncManager @Inject constructor(
                     bluetoothManager.send(message).fold(
                         onSuccess = {
                             repository.markAsSynced(clipboardItem.id)
-                            Result.success(true)
+                            kotlin.Result.success(true)
                         },
-                        onFailure = { Result.failure(it) }
+                        onFailure = { kotlin.Result.failure(it) }
                     )
                 }
-                else -> Result.failure(Exception("No available transport"))
+                else -> kotlin.Result.failure(Exception("No available transport"))
             }
         }
 
@@ -94,19 +95,19 @@ class SyncManager @Inject constructor(
                     "Wi-Fi required for image sync",
                     Toast.LENGTH_LONG
                 ).show()
-                return Result.failure(Exception("Wi-Fi required for image sync"))
+                return kotlin.Result.failure(Exception("Wi-Fi required for image sync"))
             }
             val encrypted = encryptClipboardItem(clipboardItem)
             val message = serializeForTransmission(encrypted)
             if (webSocketClient.send(message)) {
                 repository.markAsSynced(clipboardItem.id)
-                Result.success(true)
+                kotlin.Result.success(true)
             } else {
-                Result.failure(Exception("WebSocket send failed"))
+                kotlin.Result.failure(Exception("WebSocket send failed"))
             }
         }
 
-        return Result.failure(Exception("Unsupported content type"))
+        return kotlin.Result.failure(Exception("Unsupported content type"))
     }
 
     fun handleIncomingClipboard(data: EncryptedData) {
@@ -174,32 +175,11 @@ class SyncManager @Inject constructor(
     }
 
     private fun serializeClipboardItem(item: ClipboardItem): String {
-        // Simple JSON serialization (in production, use proper JSON library)
-        return """
-            {
-                "id": "${item.id}",
-                "content": "${item.content.replace("\"", "\\\"")}",
-                "contentType": "${item.contentType.name}",
-                "timestamp": ${item.timestamp},
-                "ttl": ${item.ttl},
-                "hash": "${item.hash}"
-            }
-        """.trimIndent()
+        return Json.encodeToString(ClipboardItem.serializer(), item)
     }
 
     private fun parseFromTransmission(json: String): ClipboardItem {
-        // Simple JSON parsing (in production, use proper JSON library like kotlinx.serialization)
-        // For now, return a placeholder - this should be implemented with proper JSON parsing
-        return ClipboardItem(
-            id = java.util.UUID.randomUUID().toString(),
-            content = json, // Placeholder
-            contentType = ContentType.TEXT,
-            timestamp = System.currentTimeMillis(),
-            ttl = 24 * 60 * 60 * 1000L, // 24 hours
-            synced = true,
-            sourceDeviceId = null,
-            hash = ""
-        )
+        return Json.decodeFromString(ClipboardItem.serializer(), json)
     }
 
     private fun serializeForTransmission(encrypted: EncryptedData): String {

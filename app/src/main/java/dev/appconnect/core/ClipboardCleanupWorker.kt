@@ -4,31 +4,31 @@ import android.content.Context
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import dagger.assisted.Assisted
-import dagger.assisted.AssistedInject
-import dev.appconnect.data.local.database.dao.ClipboardItemDao
+import dagger.hilt.android.qualifiers.ApplicationContext
+import dev.appconnect.data.local.database.AppDatabase
 import timber.log.Timber
 import javax.inject.Inject
 
 @HiltWorker
-class ClipboardCleanupWorker @AssistedInject constructor(
-    @Assisted context: Context,
-    @Assisted params: WorkerParameters,
-    private val clipboardItemDao: ClipboardItemDao
+class ClipboardCleanupWorker @Inject constructor(
+    @ApplicationContext context: Context,
+    params: WorkerParameters,
+    private val database: AppDatabase
 ) : CoroutineWorker(context, params) {
 
-    override suspend fun doWork(): Result {
+    override suspend fun doWork(): androidx.work.ListenableWorker.Result {
         return try {
             val now = System.currentTimeMillis()
-            val expiredItems = clipboardItemDao.getExpiredItems(now)
+            val dao = database.clipboardItemDao()
+            val expiredItems = dao.getExpiredItems(now)
 
-            clipboardItemDao.deleteExpiredItems(now)
+            dao.deleteExpiredItems(now)
 
             Timber.d("Cleaned up ${expiredItems.size} expired clipboard items")
-            Result.success()
+            androidx.work.ListenableWorker.Result.success()
         } catch (e: Exception) {
             Timber.e(e, "Failed to cleanup clipboard items")
-            Result.retry()
+            androidx.work.ListenableWorker.Result.retry()
         }
     }
 }

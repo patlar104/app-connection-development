@@ -102,6 +102,9 @@ dependencies {
     // ML Kit
     implementation(libs.mlkit.barcode)
 
+    // Accompanist Permissions
+    implementation(libs.accompanist.permissions)
+
     // Coil
     implementation(libs.coil.compose)
 

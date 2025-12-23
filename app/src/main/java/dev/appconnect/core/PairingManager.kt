@@ -24,7 +24,7 @@ class PairingManager @Inject constructor(
 ) {
     private val executor = Executors.newSingleThreadExecutor()
 
-    suspend fun pairFromQrCode(qrJson: String): Result<Boolean> = withContext(Dispatchers.IO) {
+    suspend fun pairFromQrCode(qrJson: String): kotlin.Result<Boolean> = withContext(Dispatchers.IO) {
         return@withContext try {
             // 1. Parse Data
             val info = Json.decodeFromString<QrConnectionInfo>(qrJson)
@@ -32,7 +32,7 @@ class PairingManager @Inject constructor(
 
             // 2. Validate Reachability (Ping the IP)
             if (!isReachable(info.ip, info.port)) {
-                return@withContext Result.failure(
+                return@withContext kotlin.Result.failure(
                     Exception("PC unreachable at ${info.ip}:${info.port}")
                 )
             }
@@ -67,14 +67,14 @@ class PairingManager @Inject constructor(
             // 5. Connect WebSocket
             val connected = webSocketClient.connect(info.ip, info.port)
             if (!connected) {
-                return@withContext Result.failure(Exception("WebSocket connection failed"))
+                return@withContext kotlin.Result.failure(Exception("WebSocket connection failed"))
             }
 
             Timber.d("Successfully paired with device: ${info.name}")
-            Result.success(true)
+            kotlin.Result.success(true)
         } catch (e: Exception) {
             Timber.e(e, "QR pairing failed")
-            Result.failure(e)
+            kotlin.Result.failure(e)
         }
     }
 

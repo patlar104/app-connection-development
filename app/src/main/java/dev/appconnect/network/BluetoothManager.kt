@@ -35,13 +35,13 @@ class BluetoothManager @Inject constructor(
         messageListener = listener
     }
 
-    suspend fun connect(deviceAddress: String): Result<Boolean> = withContext(Dispatchers.IO) {
-        val adapter = bluetoothAdapter ?: return@withContext Result.failure(
+    suspend fun connect(deviceAddress: String): kotlin.Result<Boolean> = withContext(Dispatchers.IO) {
+        val adapter = bluetoothAdapter ?: return@withContext kotlin.Result.failure(
             Exception("Bluetooth adapter not available")
         )
 
         if (!adapter.isEnabled) {
-            return@withContext Result.failure(Exception("Bluetooth is disabled"))
+            return@withContext kotlin.Result.failure(Exception("Bluetooth is disabled"))
         }
 
         return@withContext try {
@@ -60,15 +60,15 @@ class BluetoothManager @Inject constructor(
             startListening(socket)
 
             Timber.d("Bluetooth connected successfully")
-            Result.success(true)
+            kotlin.Result.success(true)
         } catch (e: IOException) {
             Timber.e(e, "Bluetooth connection failed")
             _connectionState.value = BluetoothConnectionState.Disconnected
-            Result.failure(e)
+            kotlin.Result.failure(e)
         } catch (e: SecurityException) {
             Timber.e(e, "Bluetooth permission denied")
             _connectionState.value = BluetoothConnectionState.Disconnected
-            Result.failure(e)
+            kotlin.Result.failure(e)
         }
     }
 
@@ -83,8 +83,8 @@ class BluetoothManager @Inject constructor(
         }
     }
 
-    suspend fun send(message: String): Result<Boolean> = withContext(Dispatchers.IO) {
-        val socket = bluetoothSocket ?: return@withContext Result.failure(
+    suspend fun send(message: String): kotlin.Result<Boolean> = withContext(Dispatchers.IO) {
+        val socket = bluetoothSocket ?: return@withContext kotlin.Result.failure(
             Exception("Not connected")
         )
 
@@ -93,10 +93,10 @@ class BluetoothManager @Inject constructor(
             outputStream.write(message.toByteArray())
             outputStream.flush()
             Timber.d("Sent Bluetooth message: ${message.take(50)}")
-            Result.success(true)
+            kotlin.Result.success(true)
         } catch (e: IOException) {
             Timber.e(e, "Failed to send Bluetooth message")
-            Result.failure(e)
+            kotlin.Result.failure(e)
         }
     }
 

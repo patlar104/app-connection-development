@@ -62,8 +62,8 @@ class NotificationManager @Inject constructor(
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setContentTitle("Clipboard from PC")
             .setContentText(clipboardItem.previewText)
-            .setSmallIcon(android.R.drawable.ic_menu_edit) // Placeholder icon
-            .addAction(android.R.drawable.ic_menu_edit, "Copy", pendingIntent)
+            .setSmallIcon(R.drawable.ic_clipboard_notification)
+            .addAction(R.drawable.ic_clipboard_notification, "Copy", pendingIntent)
             .setAutoCancel(true)
             .build()
 
@@ -79,7 +79,7 @@ class NotificationManager @Inject constructor(
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(content)
-            .setSmallIcon(android.R.drawable.ic_menu_share) // Placeholder icon
+            .setSmallIcon(R.drawable.ic_sync_tile)
             .setOngoing(true)
             .build()
 

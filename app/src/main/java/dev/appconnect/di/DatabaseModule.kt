@@ -30,5 +30,18 @@ object DatabaseModule {
 
     @Provides
     fun providePairedDeviceDao(database: AppDatabase) = database.pairedDeviceDao()
+    
+    @Provides
+    fun provideClipboardRepository(
+        clipboardItemDao: dev.appconnect.data.local.database.dao.ClipboardItemDao,
+        pairedDeviceDao: dev.appconnect.data.local.database.dao.PairedDeviceDao,
+        encryptionManager: dev.appconnect.core.encryption.EncryptionManager
+    ): dev.appconnect.data.repository.ClipboardRepository {
+        return dev.appconnect.data.repository.ClipboardRepository(
+            clipboardItemDao,
+            pairedDeviceDao,
+            encryptionManager
+        )
+    }
 }
 
