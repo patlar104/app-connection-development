@@ -3,5 +3,47 @@
     <string name="app_name">AppConnect</string>
     <string name="clipboard_sync_tile_label">Clipboard Sync</string>
     <string name="accessibility_service_description">Allows AppConnect to sync clipboard content with your PC. This service monitors clipboard changes to enable seamless synchronization.</string>
+    
+    <!-- Main Screen -->
+    <string name="main_screen_title">AppConnect</string>
+    <string name="connection_status_connected">Connected</string>
+    <string name="connection_status_disconnected">Disconnected</string>
+    <string name="connection_status_connecting">Connecting...</string>
+    
+    <!-- Pairing -->
+    <string name="scan_qr_code">Scan QR Code</string>
+    <string name="pairing_success">Device paired successfully</string>
+    <string name="pairing_failed">Pairing failed</string>
+    
+    <!-- Clipboard -->
+    <string name="clipboard_synced">Clipboard synced</string>
+    <string name="clipboard_sync_failed">Sync failed</string>
+    <string name="copy_to_clipboard">Copy to clipboard</string>
+    
+    <!-- Notifications -->
+    <string name="notification_channel_name">Clipboard Sync</string>
+    <string name="notification_channel_description">Notifications for clipboard synchronization</string>
+    <string name="notification_connected_title">Connected to PC</string>
+    <string name="notification_connected_text">Clipboard sync active</string>
+    <string name="notification_clipboard_title">New clipboard item</string>
+    <string name="notification_action_copy">Copy</string>
+    
+    <!-- Permissions -->
+    <string name="permission_camera_rationale">Camera permission is required to scan QR codes for pairing</string>
+    <string name="permission_bluetooth_rationale">Bluetooth permission is required for fallback connectivity</string>
+    <string name="permission_notification_rationale">Notification permission is required to show sync status</string>
+    
+    <!-- Errors -->
+    <string name="error_network_unavailable">Network unavailable</string>
+    <string name="error_connection_failed">Connection failed</string>
+    <string name="error_encryption_failed">Encryption error</string>
+    <string name="error_wifi_required">Wi-Fi required for image sync</string>
+    
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_auto_sync">Auto sync</string>
+    <string name="settings_sync_mode">Sync mode</string>
+    <string name="settings_clear_history">Clear clipboard history</string>
+    <string name="settings_unpair">Unpair device</string>
 </resources>
 
