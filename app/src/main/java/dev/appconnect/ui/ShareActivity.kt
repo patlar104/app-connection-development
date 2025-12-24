@@ -11,6 +11,7 @@ import dev.appconnect.domain.model.ContentType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.util.UUID
@@ -29,6 +30,12 @@ class ShareActivity : ComponentActivity() {
 
         handleShareIntent(intent)
         finish()
+    }
+    
+    override fun onDestroy() {
+        super.onDestroy()
+        // Cleanup scope when activity is destroyed
+        activityScope.cancel()
     }
 
     private fun handleShareIntent(intent: Intent) {

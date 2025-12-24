@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.appconnect.R
 import dev.appconnect.domain.model.ClipboardItem
 import dev.appconnect.service.CopyActionReceiver
@@ -16,13 +17,13 @@ import javax.inject.Singleton
 
 @Singleton
 class NotificationManager @Inject constructor(
-    private val context: Context
+    @param:ApplicationContext private val context: Context
 ) {
     private val notificationManager: android.app.NotificationManager =
         context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
 
     companion object {
-        private const val CHANNEL_ID = "clipboard_sync_channel"
+        const val CHANNEL_ID = "clipboard_sync_channel"
         private const val CHANNEL_NAME = "Clipboard Sync"
         const val ACTION_COPY_FROM_PC = "dev.appconnect.COPY_FROM_PC"
         const val EXTRA_CLIPBOARD_ID = "clipboard_id"

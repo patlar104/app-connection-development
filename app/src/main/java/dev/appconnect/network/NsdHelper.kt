@@ -3,13 +3,14 @@ package dev.appconnect.network
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class NsdHelper @Inject constructor(
-    private val context: Context
+    @param:ApplicationContext private val context: Context
 ) {
     private val nsdManager: NsdManager? by lazy {
         context.getSystemService(Context.NSD_SERVICE) as? NsdManager
@@ -32,6 +33,8 @@ class NsdHelper @Inject constructor(
             override fun onServiceFound(service: NsdServiceInfo) {
                 Timber.d("Service found: ${service.serviceName}")
                 if (service.serviceType.contains("_appconnect._tcp")) {
+                    // resolveService is deprecated but no replacement API available yet
+                    @Suppress("DEPRECATION")
                     manager.resolveService(service, createResolveListener(onServiceFound))
                 }
             }
@@ -65,7 +68,13 @@ class NsdHelper @Inject constructor(
             }
 
             override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
-                Timber.d("Service resolved: ${serviceInfo.serviceName}, host: ${serviceInfo.host}, port: ${serviceInfo.port}")
+                val hostAddress = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    serviceInfo.hostAddresses?.firstOrNull()?.hostAddress ?: "unknown"
+                } else {
+                    @Suppress("DEPRECATION")
+                    serviceInfo.host?.hostAddress ?: "unknown"
+                }
+                Timber.d("Service resolved: ${serviceInfo.serviceName}, host: $hostAddress, port: ${serviceInfo.port}")
                 onServiceResolved(serviceInfo)
             }
         }

@@ -14,8 +14,8 @@ import dev.appconnect.core.NotificationManager
 import dev.appconnect.core.SyncManager
 import dev.appconnect.domain.model.ClipboardItem
 import dev.appconnect.domain.model.ContentType
+import dev.appconnect.domain.model.Transport
 import dev.appconnect.network.BluetoothManager
-import dev.appconnect.network.Transport
 import dev.appconnect.network.WebSocketClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -94,7 +94,23 @@ class ClipboardSyncService : Service() {
     private fun handleClipboardChange(clipboardManager: ClipboardManager) {
         serviceScope.launch {
             try {
-                val clipData = clipboardManager.primaryClip ?: return@launch
+                // primaryClip is deprecated on Android 13+ - requires clipboard read permission
+                // For Android 10+ background apps, we rely on the listener being registered
+                // The listener itself indicates clipboard change, so we try to read it
+                val clipData = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    // On Android 13+, primaryClip might return null for background apps
+                    // but the listener still fires, so we check if we can read
+                    try {
+                        clipboardManager.primaryClip
+                    } catch (e: SecurityException) {
+                        Timber.w(e, "Cannot read clipboard in background on Android 13+")
+                        return@launch
+                    }
+                } else {
+                    @Suppress("DEPRECATION")
+                    clipboardManager.primaryClip
+                } ?: return@launch
+                
                 if (clipData.itemCount == 0) return@launch
 
                 val item = clipData.getItemAt(0)

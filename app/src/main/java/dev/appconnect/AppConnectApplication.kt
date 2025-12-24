@@ -2,6 +2,7 @@ package dev.appconnect
 
 import android.app.Application
 import android.os.Build
+import androidx.work.Configuration
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
@@ -11,15 +12,18 @@ import dagger.hilt.android.HiltAndroidApp
 import dev.appconnect.core.HealthManager
 import dev.appconnect.core.CrashReporter
 import dev.appconnect.core.ClipboardCleanupWorker
+import androidx.hilt.work.HiltWorkerFactory
 import timber.log.Timber
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 @HiltAndroidApp
-class AppConnectApplication : Application() {
+class AppConnectApplication : Application(), Configuration.Provider {
+
+    @Inject
+    lateinit var workerFactory: HiltWorkerFactory
 
     private lateinit var healthManager: HealthManager
-    private lateinit var workManager: WorkManager
 
     override fun onCreate() {
         super.onCreate()
@@ -27,9 +31,10 @@ class AppConnectApplication : Application() {
         // Initialize Timber
         Timber.plant(Timber.DebugTree())
 
-        healthManager = HealthManager(this)
+        // Initialize crashReporter before it might be accessed
         crashReporter = CrashReporter(this)
-        workManager = WorkManager.getInstance(this)
+        
+        healthManager = HealthManager(this)
 
         // Check for previous exit reasons
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -42,10 +47,15 @@ class AppConnectApplication : Application() {
         }
 
         // Schedule WorkManager cleanup
+        // WorkManager.getInstance() will use our Configuration.Provider automatically
         scheduleCleanupWorker()
     }
 
     private fun scheduleCleanupWorker() {
+        // WorkManager.getInstance() will use our Configuration.Provider
+        // which provides the HiltWorkerFactory
+        val workManager = WorkManager.getInstance(this)
+        
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
             .setRequiresBatteryNotLow(true)
@@ -66,10 +76,14 @@ class AppConnectApplication : Application() {
         Timber.d("Scheduled clipboard cleanup worker")
     }
 
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
+            .setWorkerFactory(workerFactory)
+            .build()
+
     companion object {
         @Volatile
         var applicationExitReason: dev.appconnect.domain.model.ExitReason? = null
-            private set
 
         @Volatile
         lateinit var crashReporter: CrashReporter

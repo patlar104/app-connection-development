@@ -4,17 +4,17 @@ import android.content.Context
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import dagger.hilt.android.qualifiers.ApplicationContext
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedInject
 import dev.appconnect.data.local.database.AppDatabase
 import timber.log.Timber
-import javax.inject.Inject
 
 @HiltWorker
-class ClipboardCleanupWorker @Inject constructor(
-    @ApplicationContext context: Context,
-    params: WorkerParameters,
+class ClipboardCleanupWorker @AssistedInject constructor(
+    @Assisted appContext: Context,
+    @Assisted workerParams: WorkerParameters,
     private val database: AppDatabase
-) : CoroutineWorker(context, params) {
+) : CoroutineWorker(appContext, workerParams) {
 
     override suspend fun doWork(): androidx.work.ListenableWorker.Result {
         return try {

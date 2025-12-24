@@ -22,30 +22,40 @@ class HealthManager(private val context: Context) {
                 context.packageName,
                 0,      // pid (0 = current)
                 1       // maxNum
-            ) ?: return null
+            )
 
             if (exitReasons.isEmpty()) return null
 
             val exitInfo = exitReasons[0]
+            // Use integer constants directly (API 30+)
+            // REASON_EXCESSIVE_RESOURCE_USAGE = 1
+            // REASON_ANR = 2
+            // REASON_CRASH = 3
+            // REASON_PERMISSION_REVOKED = 4
+            // REASON_APP_EXIT = 10 (normal app termination, not an error)
             return when (exitInfo.reason) {
-                ActivityManager.ProcessExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> {
+                1 -> { // REASON_EXCESSIVE_RESOURCE_USAGE
                     Timber.w("Previous exit reason: BATTERY_RESTRICTED")
                     ExitReason.BATTERY_RESTRICTED
                 }
-                ActivityManager.ProcessExitInfo.REASON_ANR -> {
+                2 -> { // REASON_ANR
                     Timber.w("Previous exit reason: ANR")
                     ExitReason.ANR
                 }
-                ActivityManager.ProcessExitInfo.REASON_CRASH -> {
+                3 -> { // REASON_CRASH
                     Timber.w("Previous exit reason: CRASH")
                     ExitReason.CRASH
                 }
-                ActivityManager.ProcessExitInfo.REASON_PERMISSION_REVOKED -> {
+                4 -> { // REASON_PERMISSION_REVOKED
                     Timber.w("Previous exit reason: PERMISSION_REVOKED")
                     ExitReason.PERMISSION_REVOKED
                 }
+                10 -> { // REASON_APP_EXIT (normal termination - not an error)
+                    Timber.d("Previous exit reason: APP_EXIT (normal termination)")
+                    null // Normal exit, no user action needed
+                }
                 else -> {
-                    Timber.d("Previous exit reason: ${exitInfo.reason}")
+                    Timber.d("Previous exit reason: ${exitInfo.reason} (not a critical error)")
                     null
                 }
             }

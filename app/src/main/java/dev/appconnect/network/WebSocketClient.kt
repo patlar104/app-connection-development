@@ -37,9 +37,15 @@ class WebSocketClient @Inject constructor(
                 init(null, arrayOf<TrustManager>(trustManager as TrustManager), SecureRandom())
             }
 
-            val client = OkHttpClient.Builder()
-                .sslSocketFactory(sslContext.socketFactory, trustManager)
-                .build()
+            val clientBuilder = OkHttpClient.Builder()
+            
+            // sslSocketFactory is deprecated in OkHttp 4.x, but still functional
+            // The replacement (X509TrustManager) is already set via trustManager parameter
+            // For OkHttp 4.x, we use the deprecated method with proper TrustManager
+            @Suppress("DEPRECATION")
+            clientBuilder.sslSocketFactory(sslContext.socketFactory, trustManager)
+            
+            val client = clientBuilder.build()
 
             val url = "wss://$host:$port"
             val request = Request.Builder()

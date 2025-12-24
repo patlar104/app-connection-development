@@ -72,6 +72,9 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    
+    // Material Components (for XML themes)
+    implementation(libs.material)
 
     // Navigation
     implementation(libs.androidx.navigation.compose)
@@ -80,6 +83,10 @@ dependencies {
     // Hilt
     implementation(libs.hilt.android)
     kapt(libs.hilt.compiler)
+    // kotlin-metadata-jvm for Kotlin 2.3.0 support
+    kapt(libs.kotlin.metadata.jvm)
+    // Hilt WorkManager compiler
+    kapt(libs.hilt.work.compiler)
 
     // Room
     implementation(libs.room.runtime)

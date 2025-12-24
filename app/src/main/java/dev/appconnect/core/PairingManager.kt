@@ -2,8 +2,8 @@ package dev.appconnect.core
 
 import dev.appconnect.data.repository.ClipboardRepository
 import dev.appconnect.domain.model.QrConnectionInfo
+import dev.appconnect.domain.model.Transport
 import dev.appconnect.network.CompanionDeviceManagerHelper
-import dev.appconnect.network.Transport
 import dev.appconnect.network.WebSocketClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -22,7 +22,17 @@ class PairingManager @Inject constructor(
     private val webSocketClient: WebSocketClient,
     private val cdmHelper: CompanionDeviceManagerHelper
 ) {
-    private val executor = Executors.newSingleThreadExecutor()
+    // Use a shared executor that can be properly managed
+    // Note: In a production app, consider using a managed executor service
+    private val executor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "PairingManager-Executor").apply {
+            isDaemon = true
+        }
+    }
+    
+    // Cleanup method for executor (called when app is destroyed or component removed)
+    // Note: This is a singleton, so the executor will live for app lifetime
+    // This is acceptable for a single-thread executor with daemon thread
 
     suspend fun pairFromQrCode(qrJson: String): kotlin.Result<Boolean> = withContext(Dispatchers.IO) {
         return@withContext try {
@@ -52,7 +62,8 @@ class PairingManager @Inject constructor(
             // 4. Trigger Companion Device Manager (CDM)
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 val callback = object : android.companion.CompanionDeviceManager.Callback() {
-                    override fun onDeviceFound(chooserLauncher: android.content.IntentSender?) {
+                    @Deprecated("onDeviceFound is deprecated but required for compatibility", ReplaceWith("onDeviceFound(chooserLauncher)"))
+                    override fun onDeviceFound(chooserLauncher: android.content.IntentSender) {
                         Timber.d("CDM: Device found")
                         // Launch the chooser
                     }
@@ -79,15 +90,22 @@ class PairingManager @Inject constructor(
     }
 
     private suspend fun isReachable(ip: String, port: Int): Boolean = withContext(Dispatchers.IO) {
+        var socket: Socket? = null
         return@withContext try {
-            val socket = Socket()
+            socket = Socket()
             socket.connect(InetSocketAddress(ip, port), 3000)
-            socket.close()
             Timber.d("Device is reachable: $ip:$port")
             true
         } catch (e: Exception) {
             Timber.w("Device not reachable: $ip:$port - ${e.message}")
             false
+        } finally {
+            // Ensure socket is always closed to prevent resource leak
+            try {
+                socket?.close()
+            } catch (e: Exception) {
+                Timber.w(e, "Error closing socket")
+            }
         }
     }
 }

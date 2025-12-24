@@ -21,7 +21,7 @@ class CrashReporter(private val context: Context) {
                 context.packageName,
                 0,
                 1
-            ) ?: return null
+            )
 
             if (exitReasons.isEmpty()) return null
 
@@ -32,9 +32,8 @@ class CrashReporter(private val context: Context) {
                 exitInfo.description?.let {
                     appendLine("Description: $it")
                 }
-                if (exitInfo.status != null) {
-                    appendLine("Status: ${exitInfo.status}")
-                }
+                // status is always non-null (Int type), but we log it for completeness
+                appendLine("Status: ${exitInfo.status}")
             }
 
             Timber.d("Exit info logged: $log")

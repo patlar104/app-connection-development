@@ -3,6 +3,7 @@ package dev.appconnect.core.encryption
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import dagger.hilt.android.qualifiers.ApplicationContext
 import timber.log.Timber
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -14,7 +15,7 @@ import javax.inject.Singleton
 
 @Singleton
 class EncryptionManager @Inject constructor(
-    private val context: Context
+    @param:ApplicationContext private val context: Context
 ) {
     private val keyStore: KeyStore = KeyStore.getInstance("AndroidKeyStore").apply {
         load(null)

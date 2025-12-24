@@ -15,6 +15,9 @@ object AppModule {
     @Provides
     @Singleton
     fun provideWorkManager(@ApplicationContext context: Context): WorkManager {
+        // WorkManager.getInstance() will use the Configuration.Provider from Application
+        // This is safe to call here because the Application class implements Configuration.Provider
+        // and it's queried automatically when WorkManager is initialized
         return WorkManager.getInstance(context)
     }
 }

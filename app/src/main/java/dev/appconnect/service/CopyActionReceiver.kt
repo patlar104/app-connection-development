@@ -5,7 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ClipData
 import android.content.ClipboardManager
-import dagger.hilt.EntryPointAccessors
+import dagger.hilt.android.EntryPointAccessors
 import dev.appconnect.AppConnectApplication
 import dev.appconnect.core.NotificationManager
 import dev.appconnect.di.RepositoryEntryPoint
@@ -16,8 +16,12 @@ import kotlinx.coroutines.launch
 import timber.log.Timber
 
 class CopyActionReceiver : BroadcastReceiver() {
-
-    private val receiverScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    
+    // Use a single instance executor for BroadcastReceiver to avoid leaks
+    // BroadcastReceiver lifecycle is short-lived, so we need to handle cleanup
+    companion object {
+        private val receiverScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    }
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != NotificationManager.ACTION_COPY_FROM_PC) {
