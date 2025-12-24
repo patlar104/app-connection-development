@@ -28,8 +28,6 @@ A personal-use Android app for syncing clipboard between Android device and PC. 
 - **Encryption**: AES-256-GCM with Android Keystore
 - **Network Layer**: WebSocket (TLS) and Bluetooth (BLE/Classic) support
 
-For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md).
-
 ### Sync Modes
 
 1. **Manual Sync**: Quick Settings tile trigger
@@ -69,16 +67,7 @@ A separate PC daemon application is required to receive clipboard data. The PC a
 
 See LICENSE file for details.
 
-## Documentation
-
-- [Architecture Guide](ARCHITECTURE.md) - Detailed architecture documentation
-- [Contributing Guide](CONTRIBUTING.md) - How to contribute to the project
-- [Troubleshooting](TROUBLESHOOTING.md) - Common issues and solutions
-- [Version History](VERSIONS.md) - Dependency versions and updates
-
 ## Contributing
 
 This is a personal-use project. Contributions are welcome but please note this is designed for individual use cases.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
 
