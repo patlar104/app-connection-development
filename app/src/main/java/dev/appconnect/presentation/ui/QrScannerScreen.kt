@@ -87,7 +87,9 @@ fun QrScannerScreen(
 
         // Overlay (Scanning Frame + Close Button)
         Box(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding(),
             contentAlignment = Alignment.Center
         ) {
             // Close button at top
@@ -119,7 +121,10 @@ fun QrScannerScreen(
         }
     } else {
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
