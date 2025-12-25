@@ -3,17 +3,21 @@ package dev.appconnect.presentation.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dev.appconnect.core.PairingManager
 import dev.appconnect.data.repository.ClipboardRepository
 import dev.appconnect.domain.model.ClipboardItem
 import dev.appconnect.network.WebSocketClient
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import timber.log.Timber
 import javax.inject.Inject
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val repository: ClipboardRepository,
-    private val webSocketClient: WebSocketClient
+    private val webSocketClient: WebSocketClient,
+    private val pairingManager: PairingManager
 ) : ViewModel() {
 
     val clipboardItems = repository.getAllClipboardItems()
@@ -29,5 +33,16 @@ class MainViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = WebSocketClient.ConnectionState.Disconnected
         )
+    
+    fun pairFromQrCode(qrJson: String) {
+        viewModelScope.launch {
+            val result = pairingManager.pairFromQrCode(qrJson)
+            result.onSuccess {
+                Timber.d("Successfully paired with PC")
+            }.onFailure { error ->
+                Timber.e(error, "Failed to pair with PC")
+            }
+        }
+    }
 }
 

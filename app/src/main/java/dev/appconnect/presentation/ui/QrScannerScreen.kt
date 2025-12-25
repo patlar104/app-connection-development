@@ -8,6 +8,8 @@ import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,6 +40,8 @@ fun QrScannerScreen(
     val hasCameraPermission = cameraPermissionState.status is PermissionStatus.Granted
 
     if (hasCameraPermission) {
+        val scanStateRef = remember { ScanState() }
+        
         AndroidView(
             factory = { ctx ->
                 val previewView = PreviewView(ctx)
@@ -45,22 +49,23 @@ fun QrScannerScreen(
                 val barcodeScanner = BarcodeScanning.getClient()
 
                 cameraProviderFuture.addListener({
-                    val cameraProvider = cameraProviderFuture.get()
-
-                    val imageAnalysis = ImageAnalysis.Builder()
-                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                        .build()
-                        .also {
-                            it.setAnalyzer(ContextCompat.getMainExecutor(ctx)) { imageProxy ->
-                                processImageProxy(
-                                    imageProxy,
-                                    barcodeScanner,
-                                    onScanSuccess
-                                )
-                            }
-                        }
-
                     try {
+                        val cameraProvider = cameraProviderFuture.get()
+
+                        val imageAnalysis = ImageAnalysis.Builder()
+                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                            .build()
+                            .also {
+                                it.setAnalyzer(ContextCompat.getMainExecutor(ctx)) { imageProxy ->
+                                    processImageProxy(
+                                        imageProxy,
+                                        barcodeScanner,
+                                        scanStateRef,
+                                        onScanSuccess
+                                    )
+                                }
+                            }
+
                         cameraProvider.unbindAll()
                         cameraProvider.bindToLifecycle(
                             lifecycleOwner,
@@ -80,11 +85,26 @@ fun QrScannerScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Overlay (Scanning Frame)
+        // Overlay (Scanning Frame + Close Button)
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
+            // Close button at top
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(16.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Close",
+                    tint = Color.White
+                )
+            }
+            
+            // Scanning frame
             Canvas(modifier = Modifier.size(250.dp)) {
                 drawRect(
                     color = Color.White,
@@ -111,11 +131,22 @@ fun QrScannerScreen(
     }
 }
 
+private class ScanState {
+    var hasScanned = false
+}
+
 private fun processImageProxy(
     imageProxy: ImageProxy,
     barcodeScanner: com.google.mlkit.vision.barcode.BarcodeScanner,
+    scanState: ScanState,
     onScanSuccess: (String) -> Unit
 ) {
+    // Prevent multiple scans
+    if (scanState.hasScanned) {
+        imageProxy.close()
+        return
+    }
+    
     val mediaImage = imageProxy.image
     if (mediaImage != null) {
         val image = InputImage.fromMediaImage(
@@ -127,7 +158,11 @@ private fun processImageProxy(
             .addOnSuccessListener { barcodes ->
                 for (barcode in barcodes) {
                     barcode.rawValue?.let { qrData ->
-                        onScanSuccess(qrData)
+                        if (!scanState.hasScanned) {
+                            scanState.hasScanned = true
+                            Timber.d("QR code scanned: ${qrData.take(50)}...")
+                            onScanSuccess(qrData)
+                        }
                     }
                 }
             }
