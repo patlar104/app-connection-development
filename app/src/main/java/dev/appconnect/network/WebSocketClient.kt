@@ -1,8 +1,14 @@
 package dev.appconnect.network
 
+import dev.appconnect.core.encryption.KeyExchangeManager
+import dev.appconnect.core.encryption.SessionEncryptionManager
 import dev.appconnect.data.local.database.dao.PairedDeviceDao
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -11,6 +17,7 @@ import okhttp3.WebSocketListener
 import timber.log.Timber
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
+import javax.crypto.SecretKey
 import javax.inject.Inject
 import javax.inject.Singleton
 import javax.net.ssl.SSLContext
@@ -26,13 +33,22 @@ class WebSocketClient @Inject constructor(
     val connectionState: StateFlow<ConnectionState> = _connectionState
 
     private var messageListener: ((String) -> Unit)? = null
+    private var sessionEncryption: SessionEncryptionManager? = null
+    private var pendingRsaPublicKey: String? = null
+    private var keyExchangeCompleted = false
+    
+    private val keyExchangeManager = KeyExchangeManager()
 
     fun setMessageListener(listener: (String) -> Unit) {
         messageListener = listener
     }
 
-    fun connect(host: String, port: Int): Boolean {
+    fun connect(host: String, port: Int, rsaPublicKey: String? = null): Boolean {
         return try {
+            // Store RSA public key for key exchange
+            pendingRsaPublicKey = rsaPublicKey
+            keyExchangeCompleted = false
+            
             val sslContext = SSLContext.getInstance("TLS").apply {
                 init(null, arrayOf<TrustManager>(trustManager as TrustManager), SecureRandom())
             }
@@ -85,14 +101,23 @@ class WebSocketClient @Inject constructor(
         return object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 super.onOpen(webSocket, response)
-                _connectionState.value = ConnectionState.Connected
-                Timber.d("WebSocket connected")
+                Timber.d("WebSocket opened, starting key exchange...")
+                
+                // Perform key exchange immediately after connection
+                performKeyExchange(webSocket)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 super.onMessage(webSocket, text)
                 Timber.d("Received WebSocket message: ${text.take(50)}")
-                messageListener?.invoke(text)
+                
+                // Handle key exchange acknowledgment
+                if (!keyExchangeCompleted) {
+                    handleKeyExchangeResponse(text)
+                } else {
+                    // Normal message handling
+                    messageListener?.invoke(text)
+                }
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -104,14 +129,72 @@ class WebSocketClient @Inject constructor(
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 super.onClosed(webSocket, code, reason)
                 _connectionState.value = ConnectionState.Disconnected
+                keyExchangeCompleted = false
+                sessionEncryption = null
                 Timber.d("WebSocket closed: $code - $reason")
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 super.onFailure(webSocket, t, response)
                 _connectionState.value = ConnectionState.Disconnected
+                keyExchangeCompleted = false
+                sessionEncryption = null
                 Timber.e(t, "WebSocket failure")
             }
+        }
+    }
+    
+    private fun performKeyExchange(webSocket: WebSocket) {
+        try {
+            val rsaPublicKey = pendingRsaPublicKey
+            if (rsaPublicKey == null) {
+                Timber.e("No RSA public key available for key exchange")
+                _connectionState.value = ConnectionState.Disconnected
+                webSocket.close(1008, "No RSA public key")
+                return
+            }
+            
+            // Generate session key
+            val sessionKey: SecretKey = keyExchangeManager.generateSessionKey()
+            
+            // Encrypt session key with PC's RSA public key
+            val encryptedKeyBase64 = keyExchangeManager.encryptSessionKey(sessionKey, rsaPublicKey)
+            
+            // Create session encryption manager
+            sessionEncryption = SessionEncryptionManager(sessionKey)
+            
+            // Send key exchange message
+            val keyExchangeMessage = """{"type":"key_exchange","encrypted_key":"$encryptedKeyBase64"}"""
+            webSocket.send(keyExchangeMessage)
+            
+            Timber.d("Sent key exchange message")
+        } catch (e: Exception) {
+            Timber.e(e, "Key exchange failed")
+            _connectionState.value = ConnectionState.Disconnected
+            webSocket.close(1008, "Key exchange failed")
+        }
+    }
+    
+    private fun handleKeyExchangeResponse(text: String) {
+        try {
+            val json = Json.parseToJsonElement(text).jsonObject
+            val type = json["type"]?.jsonPrimitive?.content
+            
+            if (type == "key_exchange_ack") {
+                val status = json["status"]?.jsonPrimitive?.content
+                if (status == "ok") {
+                    keyExchangeCompleted = true
+                    _connectionState.value = ConnectionState.Connected
+                    Timber.d("Key exchange completed successfully")
+                } else {
+                    val message = json["message"]?.jsonPrimitive?.content ?: "Unknown error"
+                    Timber.e("Key exchange failed: $message")
+                    _connectionState.value = ConnectionState.Disconnected
+                    webSocket?.close(1008, "Key exchange rejected")
+                }
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to parse key exchange response")
         }
     }
 

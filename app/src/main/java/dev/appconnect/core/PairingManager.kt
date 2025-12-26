@@ -83,7 +83,7 @@ class PairingManager @Inject constructor(
             }
 
             // 5. Connect WebSocket
-            val connected = webSocketClient.connect(info.ip, info.port)
+            val connected = webSocketClient.connect(info.ip, info.port, info.publicKey)
             if (!connected) {
                 return@withContext kotlin.Result.failure(Exception("WebSocket connection failed"))
             }
