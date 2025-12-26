@@ -48,18 +48,26 @@ class NotificationManager @Inject constructor(
             notificationManager.createNotificationChannel(channel)
         }
     }
+    
+    /**
+     * Checks if the app has permission to post notifications on Android 13+ (API 33+).
+     * @return true if permission is granted or not required (Android 12 and below), false otherwise
+     */
+    private fun hasNotificationPermission(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+        return true // Permission not required on Android 12 and below
+    }
 
     fun showCopyNotification(clipboardItem: ClipboardItem, notificationId: Int) {
         // Check for POST_NOTIFICATIONS permission on Android 13+
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                Timber.w("POST_NOTIFICATIONS permission not granted, cannot show notification")
-                return
-            }
+        if (!hasNotificationPermission()) {
+            Timber.w("POST_NOTIFICATIONS permission not granted, cannot show notification")
+            return
         }
         
         val intent = Intent(context, CopyActionReceiver::class.java).apply {
@@ -93,15 +101,9 @@ class NotificationManager @Inject constructor(
         notificationId: Int
     ) {
         // Check for POST_NOTIFICATIONS permission on Android 13+
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                Timber.w("POST_NOTIFICATIONS permission not granted, cannot show notification")
-                return
-            }
+        if (!hasNotificationPermission()) {
+            Timber.w("POST_NOTIFICATIONS permission not granted, cannot show notification")
+            return
         }
         
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)

@@ -73,7 +73,7 @@ class ClipboardSyncService : Service() {
 
     private fun startSync() {
         Timber.d("Starting clipboard sync")
-        // For Android 14+ (API 34+), foreground service must be started with proper notification
+        // For Android 13+ (API 33+), foreground service requires POST_NOTIFICATIONS permission
         // Check if we have POST_NOTIFICATIONS permission on Android 13+
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             if (android.content.pm.PackageManager.PERMISSION_GRANTED != 
