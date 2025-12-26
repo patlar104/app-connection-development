@@ -23,6 +23,8 @@ class PairedDeviceTrustManager @Inject constructor(
         }
 
         val serverCert = chain[0]
+        // Calculate SHA-256 fingerprint with "SHA256:" prefix (uppercase hex)
+        // This format must match the fingerprint provided in QR code
         val certFingerprint = calculateSha256Fingerprint(serverCert)
 
         // Note: Using runBlocking here is acceptable because SSL validation must be synchronous
@@ -48,6 +50,8 @@ class PairedDeviceTrustManager @Inject constructor(
     private fun calculateSha256Fingerprint(certificate: X509Certificate): String {
         val digest = MessageDigest.getInstance("SHA-256")
         val fingerprint = digest.digest(certificate.encoded)
+        // Format: "SHA256:" + uppercase hex (e.g., "SHA256:ABCD1234...")
+        // This format must match what the PC server generates in the QR code
         return "SHA256:" + fingerprint.joinToString("") { "%02X".format(it) }
     }
 }

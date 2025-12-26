@@ -23,16 +23,23 @@ class PairingManager @Inject constructor(
     private val cdmHelper: CompanionDeviceManagerHelper
 ) {
     // Use a shared executor that can be properly managed
-    // Note: In a production app, consider using a managed executor service
     private val executor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "PairingManager-Executor").apply {
             isDaemon = true
         }
     }
     
-    // Cleanup method for executor (called when app is destroyed or component removed)
-    // Note: This is a singleton, so the executor will live for app lifetime
-    // This is acceptable for a single-thread executor with daemon thread
+    // Cleanup method for executor
+    // Note: This is a singleton, so consider calling this when the app is being destroyed
+    // if you want to ensure graceful shutdown (though daemon threads will auto-terminate)
+    fun cleanup() {
+        try {
+            executor.shutdown()
+            Timber.d("PairingManager executor shut down")
+        } catch (e: Exception) {
+            Timber.w(e, "Error shutting down PairingManager executor")
+        }
+    }
 
     suspend fun pairFromQrCode(qrJson: String): kotlin.Result<Boolean> = withContext(Dispatchers.IO) {
         return@withContext try {

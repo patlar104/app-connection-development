@@ -98,8 +98,9 @@ private fun ClipboardItemEntity.toDomainModel(encryptionManager: EncryptionManag
         val encryptedData = parseEncryptedData(content)
         encryptionManager.decrypt(encryptedData)
     } catch (e: Exception) {
-        Timber.e(e, "Failed to decrypt clipboard item")
-        ""
+        Timber.e(e, "Failed to decrypt clipboard item: $id")
+        // Return placeholder to indicate decryption failure instead of silent empty string
+        "[Decryption Failed]"
     }
 
     return ClipboardItem(

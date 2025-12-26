@@ -152,7 +152,7 @@ class ClipboardSyncService : Service() {
     private fun calculateHash(text: String): String {
         val digest = java.security.MessageDigest.getInstance("SHA-256")
         val hash = digest.digest(text.toByteArray())
-        return hash.joinToString("") { "%02x".format(it) }
+        return hash.joinToString("") { "%02X".format(it) }
     }
 
     private fun setupWebSocketListener() {

@@ -67,7 +67,7 @@ class EncryptionManager @Inject constructor(
                 iv = iv
             )
         } catch (e: Exception) {
-            Timber.e(e, "Encryption failed")
+            Timber.e(e, "Encryption failed for data of length ${data.length}")
             throw EncryptionException("Failed to encrypt data", e)
         }
     }
@@ -82,7 +82,7 @@ class EncryptionManager @Inject constructor(
             val decryptedBytes = cipher.doFinal(encryptedData.encryptedBytes)
             String(decryptedBytes, Charsets.UTF_8)
         } catch (e: Exception) {
-            Timber.e(e, "Decryption failed")
+            Timber.e(e, "Decryption failed - IV length: ${encryptedData.iv.size}, encrypted length: ${encryptedData.encryptedBytes.size}")
             throw EncryptionException("Failed to decrypt data", e)
         }
     }
