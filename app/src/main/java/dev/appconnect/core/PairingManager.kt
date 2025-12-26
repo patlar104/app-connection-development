@@ -22,6 +22,10 @@ class PairingManager @Inject constructor(
     private val webSocketClient: WebSocketClient,
     private val cdmHelper: CompanionDeviceManagerHelper
 ) {
+    companion object {
+        const val SOCKET_CONNECT_TIMEOUT_MS = 10000L
+    }
+    
     // Use a shared executor that can be properly managed
     private val executor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "PairingManager-Executor").apply {
@@ -100,8 +104,7 @@ class PairingManager @Inject constructor(
         var socket: Socket? = null
         return@withContext try {
             socket = Socket()
-            // Increased timeout from 3s to 10s for slower networks
-            socket.connect(InetSocketAddress(ip, port), 10000)
+            socket.connect(InetSocketAddress(ip, port), SOCKET_CONNECT_TIMEOUT_MS.toInt())
             Timber.d("Device is reachable: $ip:$port")
             true
         } catch (e: Exception) {

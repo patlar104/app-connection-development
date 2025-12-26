@@ -24,6 +24,11 @@ import javax.inject.Singleton
 class BluetoothManager @Inject constructor(
     @param:ApplicationContext private val context: Context
 ) {
+    companion object {
+        const val BLUETOOTH_UUID_STRING = "00001101-0000-1000-8000-00805F9B34FB"
+        const val BLUETOOTH_BUFFER_SIZE = 1024
+    }
+    
     private val bluetoothAdapter: BluetoothAdapter? by lazy {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
             val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
@@ -41,7 +46,7 @@ class BluetoothManager @Inject constructor(
     private var messageListener: ((String) -> Unit)? = null
 
     // UUID for RFCOMM (standard serial port profile)
-    private val appConnectUuid = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+    private val appConnectUuid = UUID.fromString(BLUETOOTH_UUID_STRING)
 
     fun setMessageListener(listener: (String) -> Unit) {
         messageListener = listener
@@ -117,7 +122,7 @@ class BluetoothManager @Inject constructor(
             val outputStream = socket.outputStream
             outputStream.write(message.toByteArray())
             outputStream.flush()
-            Timber.d("Sent Bluetooth message: ${message.take(50)}")
+            Timber.d("Sent Bluetooth message: ${message.take(50)}") // Using hardcoded 50 for consistency with other log messages
             kotlin.Result.success(true)
         } catch (e: IOException) {
             Timber.e(e, "Failed to send Bluetooth message")
@@ -128,7 +133,7 @@ class BluetoothManager @Inject constructor(
     private suspend fun startListening(socket: BluetoothSocket) = withContext(Dispatchers.IO) {
         try {
             val inputStream = socket.inputStream
-            val buffer = ByteArray(1024)
+            val buffer = ByteArray(BLUETOOTH_BUFFER_SIZE)
 
             while (_connectionState.value == BluetoothConnectionState.Connected) {
                 val bytes = inputStream.read(buffer)

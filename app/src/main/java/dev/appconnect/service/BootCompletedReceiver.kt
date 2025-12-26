@@ -3,6 +3,8 @@ package dev.appconnect.service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
+import dev.appconnect.core.NotificationManager
 import timber.log.Timber
 
 class BootCompletedReceiver : BroadcastReceiver() {
@@ -11,9 +13,13 @@ class BootCompletedReceiver : BroadcastReceiver() {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
             Timber.d("Boot completed - starting clipboard sync service")
             val serviceIntent = Intent(context, ClipboardSyncService::class.java).apply {
-                action = ClipboardSyncService.ACTION_START_SYNC
+                action = NotificationManager.ACTION_START_SYNC
             }
-            context.startForegroundService(serviceIntent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
         }
     }
 }

@@ -13,6 +13,8 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 object DatabaseModule {
+    const val DATABASE_NAME = "appconnect_database"
+    
     @Provides
     @Singleton
     fun provideDatabase(
@@ -21,7 +23,7 @@ object DatabaseModule {
         return Room.databaseBuilder(
             context,
             AppDatabase::class.java,
-            "appconnect_database"
+            DATABASE_NAME
         ).build()
     }
 

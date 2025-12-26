@@ -12,8 +12,8 @@ import javax.crypto.spec.GCMParameterSpec
  */
 class SessionEncryptionManager(private val sessionKey: SecretKey) {
     
-    private val transformation = "AES/GCM/NoPadding"
-    private val gcmTagLength = 128
+    private val transformation = EncryptionManager.TRANSFORMATION_AES_GCM
+    private val gcmTagLength = EncryptionManager.GCM_TAG_LENGTH
     
     fun encrypt(data: String): EncryptedData {
         return try {

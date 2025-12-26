@@ -29,11 +29,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import dev.appconnect.presentation.theme.ConnectionStatusConnected
+import dev.appconnect.presentation.theme.ConnectionStatusConnecting
+import dev.appconnect.presentation.theme.ConnectionStatusDisconnecting
+import dev.appconnect.presentation.theme.ConnectionStatusDisconnected
 import dev.appconnect.presentation.viewmodel.MainViewModel
+import dev.appconnect.R
+
+// UI constants
+private const val PADDING_DEFAULT = 16
+private const val SPACING_SMALL = 8
+private const val SPACING_TINY = 4
+private const val FAB_SIZE = 48
+private const val STATUS_INDICATOR_SIZE = 40
+private const val STATUS_ICON_FONT_SIZE = 20
 
 @Composable
 fun MainScreen(viewModel: MainViewModel) {
@@ -58,7 +71,7 @@ fun MainScreen(viewModel: MainViewModel) {
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
-                .padding(16.dp)
+                .padding(PADDING_DEFAULT.dp)
         ) {
             // Header with QR scan button
             Row(
@@ -67,27 +80,27 @@ fun MainScreen(viewModel: MainViewModel) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "AppConnect",
+                    text = stringResource(R.string.ui_app_connect),
                     style = MaterialTheme.typography.headlineMedium
                 )
                 
                 FloatingActionButton(
                     onClick = { showQrScanner = true },
-                    modifier = Modifier.size(48.dp)
+                    modifier = Modifier.size(FAB_SIZE.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.QrCodeScanner,
-                        contentDescription = "Scan QR Code"
+                        contentDescription = stringResource(R.string.ui_scan_qr_code)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(PADDING_DEFAULT.dp))
 
             // Connection status
             ConnectionStatusCard(connectionState = connectionState)
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(PADDING_DEFAULT.dp))
 
             // Clipboard items list
             ClipboardItemsList(items = viewModel.clipboardItems.value)
@@ -100,13 +113,13 @@ fun ConnectionStatusCard(connectionState: dev.appconnect.network.WebSocketClient
     // Determine color and icon based on state
     val (statusColor, statusText, statusIcon) = when (connectionState) {
         dev.appconnect.network.WebSocketClient.ConnectionState.Connected -> 
-            Triple(Color(0xFF4CAF50), "Connected", "✓")
+            Triple(ConnectionStatusConnected, stringResource(R.string.ui_connected), "✓")
         dev.appconnect.network.WebSocketClient.ConnectionState.Connecting -> 
-            Triple(Color(0xFFFFC107), "Connecting...", "⟳")
+            Triple(ConnectionStatusConnecting, stringResource(R.string.ui_connecting), "⟳")
         dev.appconnect.network.WebSocketClient.ConnectionState.Disconnecting -> 
-            Triple(Color(0xFFFF9800), "Disconnecting...", "⟳")
+            Triple(ConnectionStatusDisconnecting, stringResource(R.string.ui_disconnecting), "⟳")
         dev.appconnect.network.WebSocketClient.ConnectionState.Disconnected -> 
-            Triple(Color(0xFFF44336), "Disconnected", "✗")
+            Triple(ConnectionStatusDisconnected, stringResource(R.string.ui_disconnected), "✗")
     }
     
     Card(
@@ -118,7 +131,7 @@ fun ConnectionStatusCard(connectionState: dev.appconnect.network.WebSocketClient
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(PADDING_DEFAULT.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -126,10 +139,10 @@ fun ConnectionStatusCard(connectionState: dev.appconnect.network.WebSocketClient
                 modifier = Modifier.weight(1f)
             ) {
                 Text(
-                    text = "Connection Status",
+                    text = stringResource(R.string.ui_connection_status),
                     style = MaterialTheme.typography.titleMedium
                 )
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(SPACING_TINY.dp))
                 Text(
                     text = statusText,
                     style = MaterialTheme.typography.bodyLarge,
@@ -141,7 +154,7 @@ fun ConnectionStatusCard(connectionState: dev.appconnect.network.WebSocketClient
             // Status indicator
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(STATUS_INDICATOR_SIZE.dp)
                     .background(
                         color = statusColor.copy(alpha = 0.2f),
                         shape = CircleShape
@@ -150,7 +163,7 @@ fun ConnectionStatusCard(connectionState: dev.appconnect.network.WebSocketClient
             ) {
                 Text(
                     text = statusIcon,
-                    fontSize = 20.sp,
+                    fontSize = STATUS_ICON_FONT_SIZE.sp,
                     color = statusColor
                 )
             }
@@ -162,13 +175,13 @@ fun ConnectionStatusCard(connectionState: dev.appconnect.network.WebSocketClient
 fun ClipboardItemsList(items: List<dev.appconnect.domain.model.ClipboardItem>) {
     Column {
         Text(
-            text = "Clipboard History",
+            text = stringResource(R.string.ui_clipboard_history),
             style = MaterialTheme.typography.titleMedium
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(SPACING_SMALL.dp))
         items.forEach { item ->
             ClipboardItemCard(item = item)
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(SPACING_SMALL.dp))
         }
     }
 }
@@ -179,14 +192,14 @@ fun ClipboardItemCard(item: dev.appconnect.domain.model.ClipboardItem) {
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding(PADDING_DEFAULT.dp)
         ) {
             Text(
-                text = item.content.take(50),
+                text = item.content.take(dev.appconnect.core.SyncManager.PREVIEW_TEXT_LENGTH),
                 style = MaterialTheme.typography.bodyMedium
             )
             Text(
-                text = "Synced: ${item.synced}",
+                text = stringResource(R.string.ui_synced, item.synced.toString()),
                 style = MaterialTheme.typography.bodySmall
             )
         }

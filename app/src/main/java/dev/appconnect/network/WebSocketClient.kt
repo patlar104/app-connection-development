@@ -2,6 +2,7 @@ package dev.appconnect.network
 
 import dev.appconnect.core.encryption.KeyExchangeManager
 import dev.appconnect.core.encryption.SessionEncryptionManager
+import dev.appconnect.core.NotificationManager
 import dev.appconnect.data.local.database.dao.PairedDeviceDao
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +29,43 @@ import javax.net.ssl.X509TrustManager
 class WebSocketClient @Inject constructor(
     private val trustManager: PairedDeviceTrustManager
 ) {
+    companion object {
+        // JSON message keys
+        const val JSON_KEY_TYPE = "type"
+        const val JSON_KEY_STATUS = "status"
+        const val JSON_KEY_MESSAGE = "message"
+        const val JSON_KEY_ENCRYPTED_KEY = "encrypted_key"
+        
+        // Message types
+        const val MESSAGE_TYPE_KEY_EXCHANGE = "key_exchange"
+        const val MESSAGE_TYPE_KEY_EXCHANGE_ACK = "key_exchange_ack"
+        
+        // Status values
+        const val STATUS_OK = "ok"
+        const val STATUS_ERROR = "error"
+        
+        // Network constants
+        const val MAX_RECONNECT_ATTEMPTS = 5
+        const val INITIAL_RECONNECT_DELAY_MS = 1000L
+        const val MAX_RECONNECT_DELAY_MS = 30000L
+        
+        // WebSocket close codes
+        const val CLOSE_CODE_NORMAL = 1000
+        const val CLOSE_CODE_POLICY_VIOLATION = 1008
+        
+        // Close messages
+        const val CLOSE_MESSAGE_CLIENT_DISCONNECT = "Client disconnect"
+        const val CLOSE_MESSAGE_NO_RSA_KEY = "No RSA public key"
+        const val CLOSE_MESSAGE_KEY_EXCHANGE_FAILED = "Key exchange failed"
+        const val CLOSE_MESSAGE_KEY_EXCHANGE_REJECTED = "Key exchange rejected"
+        
+        // URL format
+        const val WEBSOCKET_URL_FORMAT = "wss://%s:%d"
+        
+        // Message preview length
+        const val MESSAGE_PREVIEW_LENGTH = 50
+    }
+    
     private var webSocket: WebSocket? = null
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     val connectionState: StateFlow<ConnectionState> = _connectionState
@@ -42,9 +80,9 @@ class WebSocketClient @Inject constructor(
     private var lastPort: Int? = null
     private var shouldReconnect = false
     private var reconnectAttempts = 0
-    private val maxReconnectAttempts = 5
     
-    private val keyExchangeManager = KeyExchangeManager()
+    @Inject
+    private lateinit var keyExchangeManager: KeyExchangeManager
 
     fun setMessageListener(listener: (String) -> Unit) {
         messageListener = listener
@@ -74,7 +112,7 @@ class WebSocketClient @Inject constructor(
             
             val client = clientBuilder.build()
 
-            val url = "wss://$host:$port"
+            val url = String.format(WEBSOCKET_URL_FORMAT, host, port)
             val request = Request.Builder()
                 .url(url)
                 .build()
@@ -92,7 +130,7 @@ class WebSocketClient @Inject constructor(
 
     fun disconnect() {
         shouldReconnect = false
-        webSocket?.close(1000, "Client disconnect")
+        webSocket?.close(CLOSE_CODE_NORMAL, CLOSE_MESSAGE_CLIENT_DISCONNECT)
         webSocket = null
         _connectionState.value = ConnectionState.Disconnected
         keyExchangeCompleted = false
@@ -111,7 +149,7 @@ class WebSocketClient @Inject constructor(
         val ws = webSocket ?: return false
         val result = ws.send(message)
         if (result) {
-            Timber.d("Sent WebSocket message: ${message.take(50)}")
+            Timber.d("Sent WebSocket message: ${message.take(MESSAGE_PREVIEW_LENGTH)}")
         } else {
             Timber.w("Failed to send WebSocket message")
         }
@@ -130,7 +168,7 @@ class WebSocketClient @Inject constructor(
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 super.onMessage(webSocket, text)
-                Timber.d("Received WebSocket message: ${text.take(50)}")
+                Timber.d("Received WebSocket message: ${text.take(MESSAGE_PREVIEW_LENGTH)}")
                 
                 // Handle key exchange acknowledgment
                 if (!keyExchangeCompleted) {
@@ -174,16 +212,16 @@ class WebSocketClient @Inject constructor(
             return
         }
         
-        if (reconnectAttempts >= maxReconnectAttempts) {
-            Timber.w("Max reconnection attempts ($maxReconnectAttempts) reached")
+        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+            Timber.w("Max reconnection attempts ($MAX_RECONNECT_ATTEMPTS) reached")
             shouldReconnect = false
             return
         }
         
         reconnectAttempts++
-        val delayMs = minOf(1000L * (1 shl (reconnectAttempts - 1)), 30000L) // Exponential backoff, max 30s
+        val delayMs = minOf(INITIAL_RECONNECT_DELAY_MS * (1 shl (reconnectAttempts - 1)), MAX_RECONNECT_DELAY_MS)
         
-        Timber.d("Reconnection attempt $reconnectAttempts/$maxReconnectAttempts in ${delayMs}ms")
+        Timber.d("Reconnection attempt $reconnectAttempts/$MAX_RECONNECT_ATTEMPTS in ${delayMs}ms")
         
         // Schedule reconnection on background thread
         Thread {
@@ -205,7 +243,7 @@ class WebSocketClient @Inject constructor(
             if (rsaPublicKey == null) {
                 Timber.e("No RSA public key available for key exchange")
                 _connectionState.value = ConnectionState.Disconnected
-                webSocket.close(1008, "No RSA public key")
+                webSocket.close(CLOSE_CODE_POLICY_VIOLATION, CLOSE_MESSAGE_NO_RSA_KEY)
                 return
             }
             
@@ -219,33 +257,33 @@ class WebSocketClient @Inject constructor(
             sessionEncryption = SessionEncryptionManager(sessionKey)
             
             // Send key exchange message
-            val keyExchangeMessage = """{"type":"key_exchange","encrypted_key":"$encryptedKeyBase64"}"""
+            val keyExchangeMessage = """{"$JSON_KEY_TYPE":"$MESSAGE_TYPE_KEY_EXCHANGE","$JSON_KEY_ENCRYPTED_KEY":"$encryptedKeyBase64"}"""
             webSocket.send(keyExchangeMessage)
             
             Timber.d("Sent key exchange message")
         } catch (e: Exception) {
             Timber.e(e, "Key exchange failed")
             _connectionState.value = ConnectionState.Disconnected
-            webSocket.close(1008, "Key exchange failed")
+            webSocket.close(CLOSE_CODE_POLICY_VIOLATION, CLOSE_MESSAGE_KEY_EXCHANGE_FAILED)
         }
     }
     
     private fun handleKeyExchangeResponse(text: String) {
         try {
             val json = Json.parseToJsonElement(text).jsonObject
-            val type = json["type"]?.jsonPrimitive?.content
+            val type = json[JSON_KEY_TYPE]?.jsonPrimitive?.content
             
-            if (type == "key_exchange_ack") {
-                val status = json["status"]?.jsonPrimitive?.content
-                if (status == "ok") {
+            if (type == MESSAGE_TYPE_KEY_EXCHANGE_ACK) {
+                val status = json[JSON_KEY_STATUS]?.jsonPrimitive?.content
+                if (status == STATUS_OK) {
                     keyExchangeCompleted = true
                     _connectionState.value = ConnectionState.Connected
                     Timber.d("Key exchange completed successfully")
                 } else {
-                    val message = json["message"]?.jsonPrimitive?.content ?: "Unknown error"
+                    val message = json[JSON_KEY_MESSAGE]?.jsonPrimitive?.content ?: "Unknown error"
                     Timber.e("Key exchange failed: $message")
                     _connectionState.value = ConnectionState.Disconnected
-                    webSocket?.close(1008, "Key exchange rejected")
+                    webSocket?.close(CLOSE_CODE_POLICY_VIOLATION, CLOSE_MESSAGE_KEY_EXCHANGE_REJECTED)
                 }
             }
         } catch (e: Exception) {

@@ -7,18 +7,24 @@ import java.security.spec.X509EncodedKeySpec
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
+import javax.inject.Inject
+import javax.inject.Singleton
 
 /**
  * Manages RSA-based key exchange for establishing shared AES encryption key with PC server.
+ * 
+ * Note: This is a stateless utility class, but made a singleton for consistency with
+ * other manager classes in the codebase and to allow for potential future stateful operations.
  */
-class KeyExchangeManager {
+@Singleton
+class KeyExchangeManager @Inject constructor() {
     
     /**
      * Generate a random AES-256 key for session encryption.
      */
     fun generateSessionKey(): SecretKey {
-        val keyGenerator = KeyGenerator.getInstance("AES")
-        keyGenerator.init(256)
+        val keyGenerator = KeyGenerator.getInstance(EncryptionManager.KEY_ALGORITHM_AES)
+        keyGenerator.init(EncryptionManager.AES_KEY_SIZE)
         return keyGenerator.generateKey()
     }
     
@@ -36,11 +42,11 @@ class KeyExchangeManager {
             
             // Reconstruct the public key
             val keySpec = X509EncodedKeySpec(publicKeyBytes)
-            val keyFactory = KeyFactory.getInstance("RSA")
+            val keyFactory = KeyFactory.getInstance(EncryptionManager.KEY_ALGORITHM_RSA)
             val publicKey = keyFactory.generatePublic(keySpec)
             
             // Encrypt the session key with RSA-OAEP
-            val cipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding")
+            val cipher = Cipher.getInstance(EncryptionManager.TRANSFORMATION_RSA_OAEP)
             cipher.init(Cipher.ENCRYPT_MODE, publicKey)
             val encryptedKey = cipher.doFinal(sessionKey.encoded)
             

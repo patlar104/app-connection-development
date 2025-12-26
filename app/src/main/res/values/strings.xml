@@ -3,5 +3,42 @@
     <string name="app_name">AppConnect</string>
     <string name="clipboard_sync_tile_label">Clipboard Sync</string>
     <string name="accessibility_service_description">Allows AppConnect to sync clipboard content with your PC. This service monitors clipboard changes to enable seamless synchronization.</string>
+    
+    <!-- Notification strings -->
+    <string name="notification_connected_to_pc">Connected to PC</string>
+    <string name="notification_sync_active_websocket">Sync active via WebSocket</string>
+    <string name="notification_sync_active_transport">Sync active via %1$s</string>
+    <string name="notification_connecting_to_pc">Connecting to PC</string>
+    <string name="notification_establishing_connection">Establishing connection…</string>
+    <string name="notification_disconnecting_from_pc">Disconnecting from PC</string>
+    <string name="notification_closing_connection">Closing connection…</string>
+    <string name="notification_disconnected_from_pc">Disconnected from PC</string>
+    <string name="notification_reconnecting">Reconnecting…</string>
+    <string name="notification_clipboard_from_pc">Clipboard from PC</string>
+    <string name="notification_action_copy">Copy</string>
+    
+    <!-- UI strings -->
+    <string name="ui_scan_pc_qr_code">Scan PC QR Code</string>
+    <string name="ui_camera_permission_required">Camera permission required</string>
+    <string name="ui_grant_permission">Grant Permission</string>
+    <string name="ui_app_connect">AppConnect</string>
+    <string name="ui_scan_qr_code">Scan QR Code</string>
+    <string name="ui_connection_status">Connection Status</string>
+    <string name="ui_connected">Connected</string>
+    <string name="ui_connecting">Connecting…</string>
+    <string name="ui_disconnecting">Disconnecting…</string>
+    <string name="ui_disconnected">Disconnected</string>
+    <string name="ui_clipboard_history">Clipboard History</string>
+    <string name="ui_synced">Synced: %1$s</string>
+    <string name="ui_close">Close</string>
+    
+    <!-- Error/Toast messages -->
+    <string name="error_wifi_required_for_image_sync">Connect to Wi-Fi to sync image</string>
+    <string name="error_wifi_required_for_image_sync_short">Wi-Fi required for image sync</string>
+    <string name="error_decryption_failed">[Decryption Failed]</string>
+    
+    <!-- Service-related strings -->
+    <string name="service_pc_clipboard_label">PC Clipboard</string>
+    <string name="service_sync_clipboard_tile_label">Sync Clipboard</string>
 </resources>
 

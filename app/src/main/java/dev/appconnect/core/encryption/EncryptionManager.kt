@@ -17,14 +17,28 @@ import javax.inject.Singleton
 class EncryptionManager @Inject constructor(
     @param:ApplicationContext private val context: Context
 ) {
-    private val keyStore: KeyStore = KeyStore.getInstance("AndroidKeyStore").apply {
+    companion object {
+        const val KEYSTORE_KEY_ALIAS = "AppConnectEncryptionKey"
+        const val KEYSTORE_PROVIDER = "AndroidKeyStore"
+        const val TRANSFORMATION_AES_GCM = "AES/GCM/NoPadding"
+        const val TRANSFORMATION_RSA_OAEP = "RSA/ECB/OAEPWithSHA-256AndMGF1Padding"
+        const val KEY_ALGORITHM_AES = "AES"
+        const val KEY_ALGORITHM_RSA = "RSA"
+        const val HASH_ALGORITHM_SHA256 = "SHA-256"
+        const val AES_KEY_SIZE = 256
+        const val GCM_TAG_LENGTH = 128
+        const val IV_LENGTH = 12
+        const val CERT_FINGERPRINT_PREFIX = "SHA256:"
+    }
+    
+    private val keyStore: KeyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply {
         load(null)
     }
 
-    private val keyAlias = "AppConnectEncryptionKey"
-    private val transformation = "AES/GCM/NoPadding"
-    private val gcmTagLength = 128
-    private val ivLength = 12
+    private val keyAlias = KEYSTORE_KEY_ALIAS
+    private val transformation = TRANSFORMATION_AES_GCM
+    private val gcmTagLength = GCM_TAG_LENGTH
+    private val ivLength = IV_LENGTH
 
     init {
         ensureKeyExists()
@@ -32,14 +46,14 @@ class EncryptionManager @Inject constructor(
 
     private fun ensureKeyExists() {
         if (!keyStore.containsAlias(keyAlias)) {
-            val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+            val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER)
             val keyGenParameterSpec = KeyGenParameterSpec.Builder(
                 keyAlias,
                 KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
             )
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(256)
+                .setKeySize(AES_KEY_SIZE)
                 .build()
 
             keyGenerator.init(keyGenParameterSpec)

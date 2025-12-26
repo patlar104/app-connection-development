@@ -68,7 +68,7 @@ class AppConnectApplication : Application(), Configuration.Provider {
             .build()
 
         workManager.enqueueUniquePeriodicWork(
-            "clipboard_cleanup",
+            WORK_NAME_CLIPBOARD_CLEANUP,
             ExistingPeriodicWorkPolicy.KEEP,
             cleanupWork
         )
@@ -82,6 +82,8 @@ class AppConnectApplication : Application(), Configuration.Provider {
             .build()
 
     companion object {
+        const val WORK_NAME_CLIPBOARD_CLEANUP = "clipboard_cleanup"
+        
         @Volatile
         var applicationExitReason: dev.appconnect.domain.model.ExitReason? = null
 

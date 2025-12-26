@@ -12,6 +12,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import dev.appconnect.R
 import dev.appconnect.core.NotificationManager
 import dev.appconnect.core.SyncManager
+import dev.appconnect.core.util.HashUtil
 import dev.appconnect.domain.model.ClipboardItem
 import dev.appconnect.domain.model.ContentType
 import dev.appconnect.domain.model.Transport
@@ -49,8 +50,6 @@ class ClipboardSyncService : Service() {
 
     companion object {
         private const val NOTIFICATION_ID = 1
-        const val ACTION_START_SYNC = "dev.appconnect.START_SYNC"
-        const val ACTION_STOP_SYNC = "dev.appconnect.STOP_SYNC"
     }
 
     override fun onCreate() {
@@ -64,8 +63,8 @@ class ClipboardSyncService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START_SYNC -> startSync()
-            ACTION_STOP_SYNC -> stopSync()
+            NotificationManager.ACTION_START_SYNC -> startSync()
+            NotificationManager.ACTION_STOP_SYNC -> stopSync()
         }
         return START_STICKY
     }
@@ -137,7 +136,7 @@ class ClipboardSyncService : Service() {
                     content = text,
                     contentType = ContentType.TEXT,
                     timestamp = System.currentTimeMillis(),
-                    ttl = 24 * 60 * 60 * 1000L, // 24 hours
+                    ttl = dev.appconnect.core.SyncManager.DEFAULT_CLIPBOARD_TTL_MS,
                     synced = false,
                     sourceDeviceId = null,
                     hash = calculateHash(text)
@@ -151,9 +150,7 @@ class ClipboardSyncService : Service() {
     }
 
     private fun calculateHash(text: String): String {
-        val digest = java.security.MessageDigest.getInstance("SHA-256")
-        val hash = digest.digest(text.toByteArray())
-        return hash.joinToString("") { "%02X".format(it) }
+        return HashUtil.sha256(text)
     }
 
     private fun setupWebSocketListener() {
@@ -206,32 +203,32 @@ class ClipboardSyncService : Service() {
         val notification = when (state) {
             WebSocketClient.ConnectionState.Connected -> {
                 NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
-                    .setContentTitle("Connected to PC")
-                    .setContentText("Sync active via WebSocket")
+                    .setContentTitle(getString(R.string.notification_connected_to_pc))
+                    .setContentText(getString(R.string.notification_sync_active_websocket))
                     .setSmallIcon(R.drawable.ic_sync_tile)
                     .setOngoing(true)
                     .build()
             }
             WebSocketClient.ConnectionState.Connecting -> {
                 NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
-                    .setContentTitle("Connecting to PC")
-                    .setContentText("Establishing connection...")
+                    .setContentTitle(getString(R.string.notification_connecting_to_pc))
+                    .setContentText(getString(R.string.notification_establishing_connection))
                     .setSmallIcon(R.drawable.ic_sync_tile)
                     .setOngoing(true)
                     .build()
             }
             WebSocketClient.ConnectionState.Disconnecting -> {
                 NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
-                    .setContentTitle("Disconnecting from PC")
-                    .setContentText("Closing connection...")
+                    .setContentTitle(getString(R.string.notification_disconnecting_from_pc))
+                    .setContentText(getString(R.string.notification_closing_connection))
                     .setSmallIcon(R.drawable.ic_sync_tile)
                     .setOngoing(true)
                     .build()
             }
             WebSocketClient.ConnectionState.Disconnected -> {
                 NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
-                    .setContentTitle("Disconnected from PC")
-                    .setContentText("Reconnecting...")
+                    .setContentTitle(getString(R.string.notification_disconnected_from_pc))
+                    .setContentText(getString(R.string.notification_reconnecting))
                     .setSmallIcon(R.drawable.ic_sync_tile)
                     .setOngoing(true)
                     .build()
@@ -251,51 +248,7 @@ class ClipboardSyncService : Service() {
     }
 
     private fun parseEncryptedMessage(message: String): dev.appconnect.core.encryption.EncryptedData {
-        val parts = message.split("|")
-        if (parts.size != 2) {
-            throw IllegalArgumentException("Invalid message format")
-        }
-        val iv = android.util.Base64.decode(parts[0], android.util.Base64.NO_WRAP)
-        val encryptedBytes = android.util.Base64.decode(parts[1], android.util.Base64.NO_WRAP)
-        return dev.appconnect.core.encryption.EncryptedData(
-            encryptedBytes = encryptedBytes,
-            iv = iv
-        )
-    }
-
-    private fun handleWebSocketFailure() {
-        Timber.w("WebSocket connection lost, attempting Bluetooth fallback")
-        syncManager.setCurrentTransport(Transport.BLUETOOTH)
-
-        // Attempt Bluetooth connection
-        serviceScope.launch {
-            // Get paired device from repository
-            val pairedDevices = repository.getPairedDevices()
-            val device = pairedDevices.firstOrNull() ?: run {
-                Timber.e("No paired devices available for Bluetooth fallback")
-                stopSelf()
-                return@launch
-            }
-            
-            // Extract Bluetooth address from device info
-            val bluetoothAddress = device.bluetoothAddress ?: run {
-                Timber.e("Device has no Bluetooth address")
-                stopSelf()
-                return@launch
-            }
-            
-            val result = bluetoothManager.connect(bluetoothAddress)
-            result.fold(
-                onSuccess = {
-                    currentTransport = Transport.BLUETOOTH
-                    updateNotification(Transport.BLUETOOTH)
-                },
-                onFailure = { error ->
-                    Timber.e("Both transports failed: ${error.message}")
-                    stopSelf()
-                }
-            )
-        }
+        return dev.appconnect.core.util.EncryptedDataSerializer.parse(message)
     }
 
     private fun updateNotification(transport: Transport) {
@@ -305,8 +258,8 @@ class ClipboardSyncService : Service() {
 
     private fun createNotification(transport: Transport): Notification {
         return NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
-            .setContentTitle("Connected to PC")
-            .setContentText("Sync active via ${transport.name}")
+            .setContentTitle(getString(R.string.notification_connected_to_pc))
+            .setContentText(getString(R.string.notification_sync_active_transport, transport.name))
             .setSmallIcon(R.drawable.ic_sync_tile)
             .setOngoing(true)
             .build()

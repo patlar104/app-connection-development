@@ -82,8 +82,8 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".ui.ShareActivity"
+            <activity
+                android:name=".presentation.ui.ShareActivity"
             android:exported="true"
             android:theme="@style/Theme.AppConnect.Transparent">
             <intent-filter>

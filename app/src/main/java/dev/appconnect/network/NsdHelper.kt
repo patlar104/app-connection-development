@@ -12,6 +12,10 @@ import javax.inject.Singleton
 class NsdHelper @Inject constructor(
     @param:ApplicationContext private val context: Context
 ) {
+    companion object {
+        const val MDNS_SERVICE_TYPE = "_appconnect._tcp"
+    }
+    
     private val nsdManager: NsdManager? by lazy {
         context.getSystemService(Context.NSD_SERVICE) as? NsdManager
     }
@@ -32,7 +36,7 @@ class NsdHelper @Inject constructor(
 
             override fun onServiceFound(service: NsdServiceInfo) {
                 Timber.d("Service found: ${service.serviceName}")
-                if (service.serviceType.contains("_appconnect._tcp")) {
+                if (service.serviceType.contains(MDNS_SERVICE_TYPE)) {
                     // resolveService is deprecated but no replacement API available yet
                     @Suppress("DEPRECATION")
                     manager.resolveService(service, createResolveListener(onServiceFound))
@@ -56,7 +60,7 @@ class NsdHelper @Inject constructor(
             }
         }
 
-        manager.discoverServices("_appconnect._tcp", NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+        manager.discoverServices(MDNS_SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
     }
 
     private fun createResolveListener(

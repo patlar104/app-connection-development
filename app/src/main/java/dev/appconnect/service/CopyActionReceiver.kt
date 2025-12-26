@@ -7,6 +7,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import dagger.hilt.android.EntryPointAccessors
 import dev.appconnect.AppConnectApplication
+import dev.appconnect.R
 import dev.appconnect.core.NotificationManager
 import dev.appconnect.di.RepositoryEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -46,7 +47,7 @@ class CopyActionReceiver : BroadcastReceiver() {
 
             // Now we have foreground focus from notification tap
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText("PC Clipboard", item.content))
+            clipboard.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.service_pc_clipboard_label), item.content))
 
             Timber.d("Copied clipboard item to system clipboard: ${item.id}")
         }

@@ -48,11 +48,11 @@ class PairedDeviceTrustManager @Inject constructor(
     override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
 
     private fun calculateSha256Fingerprint(certificate: X509Certificate): String {
-        val digest = MessageDigest.getInstance("SHA-256")
+        val digest = MessageDigest.getInstance(dev.appconnect.core.encryption.EncryptionManager.HASH_ALGORITHM_SHA256)
         val fingerprint = digest.digest(certificate.encoded)
         // Format: "SHA256:" + uppercase hex (e.g., "SHA256:ABCD1234...")
         // This format must match what the PC server generates in the QR code
-        return "SHA256:" + fingerprint.joinToString("") { "%02X".format(it) }
+        return dev.appconnect.core.encryption.EncryptionManager.CERT_FINGERPRINT_PREFIX + fingerprint.joinToString("") { "%02X".format(it) }
     }
 }
 

@@ -30,9 +30,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import dev.appconnect.R
+import dev.appconnect.presentation.theme.QRScannerOverlayWhite
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.PermissionStatus
 import com.google.accompanist.permissions.rememberPermissionState
@@ -40,6 +43,12 @@ import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import timber.log.Timber
+
+// QR Scanner constants
+private const val SCANNING_FRAME_SIZE_DP = 250
+private const val SCANNING_TEXT_TOP_PADDING_DP = 300
+private const val SCANNING_FRAME_STROKE_WIDTH_DP = 4
+private const val QR_PREVIEW_LENGTH = 50
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
@@ -110,26 +119,26 @@ fun QrScannerScreen(
                 onClick = onDismiss,
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .padding(16.dp)
+                    .padding(16.dp) // Keep 16.dp for padding, not a scanning-specific constant
             ) {
                 Icon(
                     imageVector = Icons.Default.Close,
-                    contentDescription = "Close",
-                    tint = Color.White
+                    contentDescription = stringResource(R.string.ui_close),
+                    tint = QRScannerOverlayWhite
                 )
             }
             
             // Scanning frame
-            Canvas(modifier = Modifier.size(250.dp)) {
+            Canvas(modifier = Modifier.size(SCANNING_FRAME_SIZE_DP.dp)) {
                 drawRect(
-                    color = Color.White,
-                    style = Stroke(width = 4.dp.toPx())
+                    color = QRScannerOverlayWhite,
+                    style = Stroke(width = SCANNING_FRAME_STROKE_WIDTH_DP.dp.toPx())
                 )
             }
             Text(
-                text = "Scan PC QR Code",
-                color = Color.White,
-                modifier = Modifier.padding(top = 300.dp)
+                text = stringResource(R.string.ui_scan_pc_qr_code),
+                color = QRScannerOverlayWhite,
+                modifier = Modifier.padding(top = SCANNING_TEXT_TOP_PADDING_DP.dp)
             )
         }
     } else {
@@ -141,9 +150,9 @@ fun QrScannerScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text("Camera permission required")
+            Text(stringResource(R.string.ui_camera_permission_required))
             Button(onClick = { cameraPermissionState.launchPermissionRequest() }) {
-                Text("Grant Permission")
+                Text(stringResource(R.string.ui_grant_permission))
             }
         }
     }
@@ -178,7 +187,7 @@ private fun processImageProxy(
                     barcode.rawValue?.let { qrData ->
                         if (!scanState.hasScanned) {
                             scanState.hasScanned = true
-                            Timber.d("QR code scanned: ${qrData.take(50)}...")
+                            Timber.d("QR code scanned: ${qrData.take(QR_PREVIEW_LENGTH)}...")
                             onScanSuccess(qrData)
                         }
                     }

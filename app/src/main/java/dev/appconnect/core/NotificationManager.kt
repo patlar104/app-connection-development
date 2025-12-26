@@ -30,6 +30,14 @@ class NotificationManager @Inject constructor(
         private const val CHANNEL_NAME = "Clipboard Sync"
         const val ACTION_COPY_FROM_PC = "dev.appconnect.COPY_FROM_PC"
         const val EXTRA_CLIPBOARD_ID = "clipboard_id"
+        
+        // Service actions (moved from ClipboardSyncService)
+        const val ACTION_START_SYNC = "dev.appconnect.START_SYNC"
+        const val ACTION_STOP_SYNC = "dev.appconnect.STOP_SYNC"
+        
+        // Network timeouts
+        const val CONNECTION_TIMEOUT_MS = 10000L
+        const val SOCKET_TIMEOUT_MS = 10000L
     }
 
     init {
@@ -84,10 +92,10 @@ class NotificationManager @Inject constructor(
         val pendingIntent = PendingIntent.getBroadcast(context, 0, intent, flags)
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setContentTitle("Clipboard from PC")
+            .setContentTitle(context.getString(R.string.notification_clipboard_from_pc))
             .setContentText(clipboardItem.previewText)
             .setSmallIcon(R.drawable.ic_clipboard_notification)
-            .addAction(R.drawable.ic_clipboard_notification, "Copy", pendingIntent)
+            .addAction(R.drawable.ic_clipboard_notification, context.getString(R.string.notification_action_copy), pendingIntent)
             .setAutoCancel(true)
             .build()
 

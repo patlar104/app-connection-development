@@ -6,12 +6,14 @@ import android.widget.Toast
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.appconnect.core.encryption.EncryptedData
 import dev.appconnect.core.encryption.EncryptionManager
+import dev.appconnect.core.util.EncryptedDataSerializer
 import dev.appconnect.data.repository.ClipboardRepository
 import dev.appconnect.domain.model.ClipboardItem
 import dev.appconnect.domain.model.ContentType
 import dev.appconnect.domain.model.Transport
 import dev.appconnect.network.BluetoothManager
 import dev.appconnect.network.WebSocketClient
+import dev.appconnect.R
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CoroutineScope
@@ -33,9 +35,16 @@ class SyncManager @Inject constructor(
     private val bluetoothManager: BluetoothManager,
     private val notificationManager: NotificationManager
 ) {
+    companion object {
+        const val DEFAULT_CLIPBOARD_TTL_MS = 24L * 60 * 60 * 1000 // 24 hours
+        const val NOTIFICATION_DEBOUNCE_MS = 500L
+        const val PREVIEW_TEXT_LENGTH = 50
+        const val LOG_MESSAGE_PREVIEW_LENGTH = 50
+        const val NOTIFICATION_ID_CLIPBOARD_COPY = 1001
+    }
+    
     private var pendingNotificationJob: Job? = null
     private var pendingClipboardItem: ClipboardItem? = null
-    private val notificationId = 1001 // Single notification ID for all clipboard notifications
 
     private var currentTransport: Transport = Transport.WEBSOCKET
 
@@ -52,7 +61,7 @@ class SyncManager @Inject constructor(
             // Show toast and abort
             Toast.makeText(
                 context,
-                "Connect to Wi-Fi to sync image",
+                context.getString(dev.appconnect.R.string.error_wifi_required_for_image_sync),
                 Toast.LENGTH_LONG
             ).show()
             Timber.w("Image sync attempted over Bluetooth - blocked")
@@ -104,7 +113,7 @@ class SyncManager @Inject constructor(
             if (currentTransport != Transport.WEBSOCKET) {
                 Toast.makeText(
                     context,
-                    "Wi-Fi required for image sync",
+                    context.getString(dev.appconnect.R.string.error_wifi_required_for_image_sync_short),
                     Toast.LENGTH_LONG
                 ).show()
                 return kotlin.Result.failure(Exception("Wi-Fi required for image sync"))
@@ -162,11 +171,11 @@ class SyncManager @Inject constructor(
         // Store the latest clipboard item
         pendingClipboardItem = clipboardItem
 
-        // Schedule notification after 500ms debounce
+        // Schedule notification after debounce delay
         pendingNotificationJob = handlerScope.launch {
-            delay(500)
+            delay(NOTIFICATION_DEBOUNCE_MS)
             pendingClipboardItem?.let { item ->
-                notificationManager.showCopyNotification(item, notificationId)
+                notificationManager.showCopyNotification(item, NOTIFICATION_ID_CLIPBOARD_COPY)
                 pendingClipboardItem = null
             }
         }
@@ -202,7 +211,7 @@ class SyncManager @Inject constructor(
     private fun writeToClipboard(clipboardItem: ClipboardItem) {
         // This will be implemented by the service that calls SyncManager
         // For now, just log
-        Timber.d("Writing to clipboard: ${clipboardItem.content.take(50)}")
+        Timber.d("Writing to clipboard: ${clipboardItem.content.take(LOG_MESSAGE_PREVIEW_LENGTH)}")
     }
 
     private fun encryptClipboardItem(item: ClipboardItem): EncryptedData {
@@ -219,12 +228,7 @@ class SyncManager @Inject constructor(
     }
 
     private fun serializeForTransmission(encrypted: EncryptedData): String {
-        val ivBase64 = android.util.Base64.encodeToString(encrypted.iv, android.util.Base64.NO_WRAP)
-        val encryptedBase64 = android.util.Base64.encodeToString(
-            encrypted.encryptedBytes,
-            android.util.Base64.NO_WRAP
-        )
-        return "$ivBase64|$encryptedBase64"
+        return EncryptedDataSerializer.serialize(encrypted)
     }
 }
 
