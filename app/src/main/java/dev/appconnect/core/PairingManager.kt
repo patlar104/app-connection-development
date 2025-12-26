@@ -100,7 +100,8 @@ class PairingManager @Inject constructor(
         var socket: Socket? = null
         return@withContext try {
             socket = Socket()
-            socket.connect(InetSocketAddress(ip, port), 3000)
+            // Increased timeout from 3s to 10s for slower networks
+            socket.connect(InetSocketAddress(ip, port), 10000)
             Timber.d("Device is reachable: $ip:$port")
             true
         } catch (e: Exception) {

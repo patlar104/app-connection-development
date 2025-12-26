@@ -37,6 +37,13 @@ class WebSocketClient @Inject constructor(
     private var pendingRsaPublicKey: String? = null
     private var keyExchangeCompleted = false
     
+    // Reconnection state
+    private var lastHost: String? = null
+    private var lastPort: Int? = null
+    private var shouldReconnect = false
+    private var reconnectAttempts = 0
+    private val maxReconnectAttempts = 5
+    
     private val keyExchangeManager = KeyExchangeManager()
 
     fun setMessageListener(listener: (String) -> Unit) {
@@ -45,9 +52,13 @@ class WebSocketClient @Inject constructor(
 
     fun connect(host: String, port: Int, rsaPublicKey: String? = null): Boolean {
         return try {
-            // Store RSA public key for key exchange
+            // Store connection details for reconnection
+            lastHost = host
+            lastPort = port
             pendingRsaPublicKey = rsaPublicKey
             keyExchangeCompleted = false
+            shouldReconnect = true
+            reconnectAttempts = 0
             
             val sslContext = SSLContext.getInstance("TLS").apply {
                 init(null, arrayOf<TrustManager>(trustManager as TrustManager), SecureRandom())
@@ -80,11 +91,13 @@ class WebSocketClient @Inject constructor(
     }
 
     fun disconnect() {
+        shouldReconnect = false
         webSocket?.close(1000, "Client disconnect")
         webSocket = null
         _connectionState.value = ConnectionState.Disconnected
         keyExchangeCompleted = false
         sessionEncryption = null
+        reconnectAttempts = 0
         Timber.d("WebSocket disconnected")
     }
     
@@ -148,8 +161,42 @@ class WebSocketClient @Inject constructor(
                 keyExchangeCompleted = false
                 sessionEncryption = null
                 Timber.e(t, "WebSocket failure")
+                
+                // Attempt automatic reconnection
+                attemptReconnection()
             }
         }
+    }
+    
+    private fun attemptReconnection() {
+        if (!shouldReconnect || lastHost == null || lastPort == null) {
+            Timber.d("Reconnection not applicable")
+            return
+        }
+        
+        if (reconnectAttempts >= maxReconnectAttempts) {
+            Timber.w("Max reconnection attempts ($maxReconnectAttempts) reached")
+            shouldReconnect = false
+            return
+        }
+        
+        reconnectAttempts++
+        val delayMs = minOf(1000L * (1 shl (reconnectAttempts - 1)), 30000L) // Exponential backoff, max 30s
+        
+        Timber.d("Reconnection attempt $reconnectAttempts/$maxReconnectAttempts in ${delayMs}ms")
+        
+        // Schedule reconnection on background thread
+        Thread {
+            try {
+                Thread.sleep(delayMs)
+                if (shouldReconnect) {
+                    Timber.d("Attempting to reconnect...")
+                    connect(lastHost!!, lastPort!!, pendingRsaPublicKey)
+                }
+            } catch (e: InterruptedException) {
+                Timber.w("Reconnection interrupted")
+            }
+        }.start()
     }
     
     private fun performKeyExchange(webSocket: WebSocket) {
