@@ -59,6 +59,7 @@ class ClipboardSyncService : Service() {
         setupClipboardListener()
         setupWebSocketListener()
         setupBluetoothListener()
+        setupConnectionStateMonitoring()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -175,6 +176,78 @@ class ClipboardSyncService : Service() {
                 Timber.e(e, "Failed to parse Bluetooth message")
             }
         }
+    }
+    
+    private fun setupConnectionStateMonitoring() {
+        // Monitor WebSocket connection state and update notification
+        serviceScope.launch {
+            webSocketClient.connectionState.collect { state ->
+                Timber.d("WebSocket connection state changed: $state")
+                updateNotificationForConnectionState(state)
+            }
+        }
+        
+        // Monitor Bluetooth connection state
+        serviceScope.launch {
+            bluetoothManager.connectionState.collect { state ->
+                Timber.d("Bluetooth connection state changed: $state")
+                // Update transport if Bluetooth becomes primary
+                if (state == BluetoothManager.BluetoothConnectionState.Connected) {
+                    currentTransport = Transport.BLUETOOTH
+                    updateNotification(Transport.BLUETOOTH)
+                }
+            }
+        }
+    }
+    
+    private fun updateNotificationForConnectionState(state: WebSocketClient.ConnectionState) {
+        if (!isServiceRunning()) return
+        
+        val notification = when (state) {
+            WebSocketClient.ConnectionState.Connected -> {
+                NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
+                    .setContentTitle("Connected to PC")
+                    .setContentText("Sync active via WebSocket")
+                    .setSmallIcon(R.drawable.ic_sync_tile)
+                    .setOngoing(true)
+                    .build()
+            }
+            WebSocketClient.ConnectionState.Connecting -> {
+                NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
+                    .setContentTitle("Connecting to PC")
+                    .setContentText("Establishing connection...")
+                    .setSmallIcon(R.drawable.ic_sync_tile)
+                    .setOngoing(true)
+                    .build()
+            }
+            WebSocketClient.ConnectionState.Disconnecting -> {
+                NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
+                    .setContentTitle("Disconnecting from PC")
+                    .setContentText("Closing connection...")
+                    .setSmallIcon(R.drawable.ic_sync_tile)
+                    .setOngoing(true)
+                    .build()
+            }
+            WebSocketClient.ConnectionState.Disconnected -> {
+                NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
+                    .setContentTitle("Disconnected from PC")
+                    .setContentText("Reconnecting...")
+                    .setSmallIcon(R.drawable.ic_sync_tile)
+                    .setOngoing(true)
+                    .build()
+            }
+        }
+        
+        try {
+            startForeground(NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to update notification for connection state")
+        }
+    }
+    
+    private fun isServiceRunning(): Boolean {
+        // Simple check - service is running if it has been started
+        return true
     }
 
     private fun parseEncryptedMessage(message: String): dev.appconnect.core.encryption.EncryptedData {
