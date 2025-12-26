@@ -1,6 +1,8 @@
 package dev.appconnect.presentation.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,7 +12,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -18,18 +22,25 @@ import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.appconnect.presentation.viewmodel.MainViewModel
 
 @Composable
 fun MainScreen(viewModel: MainViewModel) {
     var showQrScanner by remember { mutableStateOf(false) }
+    
+    // Observe connection state changes
+    val connectionState by viewModel.connectionState.collectAsState()
     
     // Show QR scanner if requested
     if (showQrScanner) {
@@ -74,7 +85,7 @@ fun MainScreen(viewModel: MainViewModel) {
             Spacer(modifier = Modifier.height(16.dp))
 
             // Connection status
-            ConnectionStatusCard(connectionState = viewModel.connectionState.value)
+            ConnectionStatusCard(connectionState = connectionState)
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -86,21 +97,63 @@ fun MainScreen(viewModel: MainViewModel) {
 
 @Composable
 fun ConnectionStatusCard(connectionState: dev.appconnect.network.WebSocketClient.ConnectionState) {
+    // Determine color and icon based on state
+    val (statusColor, statusText, statusIcon) = when (connectionState) {
+        dev.appconnect.network.WebSocketClient.ConnectionState.Connected -> 
+            Triple(Color(0xFF4CAF50), "Connected", "✓")
+        dev.appconnect.network.WebSocketClient.ConnectionState.Connecting -> 
+            Triple(Color(0xFFFFC107), "Connecting...", "⟳")
+        dev.appconnect.network.WebSocketClient.ConnectionState.Disconnecting -> 
+            Triple(Color(0xFFFF9800), "Disconnecting...", "⟳")
+        dev.appconnect.network.WebSocketClient.ConnectionState.Disconnected -> 
+            Triple(Color(0xFFF44336), "Disconnected", "✗")
+    }
+    
     Card(
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "Connection Status",
-                style = MaterialTheme.typography.titleMedium
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = connectionState.name,
-                style = MaterialTheme.typography.bodyMedium
-            )
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = "Connection Status",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = statusText,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = statusColor,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            
+            // Status indicator
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(
+                        color = statusColor.copy(alpha = 0.2f),
+                        shape = CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = statusIcon,
+                    fontSize = 20.sp,
+                    color = statusColor
+                )
+            }
         }
     }
 }
