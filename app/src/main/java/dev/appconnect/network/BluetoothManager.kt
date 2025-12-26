@@ -1,10 +1,14 @@
 package dev.appconnect.network
 
+import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothSocket
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,6 +48,19 @@ class BluetoothManager @Inject constructor(
     }
 
     suspend fun connect(deviceAddress: String): kotlin.Result<Boolean> = withContext(Dispatchers.IO) {
+        // Check for BLUETOOTH_CONNECT permission on Android 12+ (API 31+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.BLUETOOTH_CONNECT
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                return@withContext kotlin.Result.failure(
+                    SecurityException("BLUETOOTH_CONNECT permission not granted")
+                )
+            }
+        }
+        
         val adapter = bluetoothAdapter ?: return@withContext kotlin.Result.failure(
             Exception("Bluetooth adapter not available")
         )

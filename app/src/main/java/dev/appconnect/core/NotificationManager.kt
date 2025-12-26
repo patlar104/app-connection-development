@@ -1,12 +1,15 @@
 package dev.appconnect.core
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.appconnect.R
 import dev.appconnect.domain.model.ClipboardItem
@@ -47,6 +50,18 @@ class NotificationManager @Inject constructor(
     }
 
     fun showCopyNotification(clipboardItem: ClipboardItem, notificationId: Int) {
+        // Check for POST_NOTIFICATIONS permission on Android 13+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                Timber.w("POST_NOTIFICATIONS permission not granted, cannot show notification")
+                return
+            }
+        }
+        
         val intent = Intent(context, CopyActionReceiver::class.java).apply {
             putExtra(EXTRA_CLIPBOARD_ID, clipboardItem.id)
             action = ACTION_COPY_FROM_PC
@@ -77,6 +92,18 @@ class NotificationManager @Inject constructor(
         content: String,
         notificationId: Int
     ) {
+        // Check for POST_NOTIFICATIONS permission on Android 13+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                Timber.w("POST_NOTIFICATIONS permission not granted, cannot show notification")
+                return
+            }
+        }
+        
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(content)
