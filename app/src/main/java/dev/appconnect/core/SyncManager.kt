@@ -66,7 +66,16 @@ class SyncManager @Inject constructor(
         if (clipboardItem.contentType == ContentType.TEXT) {
             return when (currentTransport) {
                 Transport.WEBSOCKET -> {
-                    val encrypted = encryptClipboardItem(clipboardItem)
+                    // Use session encryption if available, otherwise fall back to local encryption
+                    val sessionEncryption = webSocketClient.getSessionEncryption()
+                    val encrypted = if (sessionEncryption != null) {
+                        val json = serializeClipboardItem(clipboardItem)
+                        sessionEncryption.encrypt(json)
+                    } else {
+                        Timber.w("Session encryption not available, using local encryption")
+                        encryptClipboardItem(clipboardItem)
+                    }
+                    
                     val message = serializeForTransmission(encrypted)
                     if (webSocketClient.send(message)) {
                         repository.markAsSynced(clipboardItem.id)
@@ -120,7 +129,15 @@ class SyncManager @Inject constructor(
     fun handleIncomingClipboard(data: EncryptedData) {
         handlerScope.launch {
             try {
-                val decrypted = encryptionManager.decrypt(data)
+                // Use session encryption if available, otherwise fall back to local encryption
+                val sessionEncryption = webSocketClient.getSessionEncryption()
+                val decrypted = if (sessionEncryption != null) {
+                    sessionEncryption.decrypt(data)
+                } else {
+                    Timber.w("Session encryption not available, using local encryption")
+                    encryptionManager.decrypt(data)
+                }
+                
                 // Parse the decrypted JSON to get ClipboardItem
                 val clipboardItem = parseFromTransmission(decrypted)
                 repository.saveClipboardItem(clipboardItem)

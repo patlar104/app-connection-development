@@ -83,8 +83,16 @@ class WebSocketClient @Inject constructor(
         webSocket?.close(1000, "Client disconnect")
         webSocket = null
         _connectionState.value = ConnectionState.Disconnected
+        keyExchangeCompleted = false
+        sessionEncryption = null
         Timber.d("WebSocket disconnected")
     }
+    
+    /**
+     * Get the session encryption manager for encrypting/decrypting messages.
+     * Returns null if key exchange hasn't completed yet.
+     */
+    fun getSessionEncryption(): SessionEncryptionManager? = sessionEncryption
 
     fun send(message: String): Boolean {
         val ws = webSocket ?: return false
