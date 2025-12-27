@@ -2,24 +2,42 @@ package dev.appconnect.presentation.ui
 
 import android.Manifest
 import android.content.Context
-import androidx.camera.core.*
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import dev.appconnect.R
+import dev.appconnect.presentation.theme.QRScannerOverlayWhite
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.PermissionStatus
 import com.google.accompanist.permissions.rememberPermissionState
@@ -27,6 +45,16 @@ import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import timber.log.Timber
+import android.util.Size
+import android.os.Handler
+import android.os.Looper
+import java.util.concurrent.Executors
+
+// QR Scanner constants
+private const val SCANNING_FRAME_SIZE_DP = 250
+private const val SCANNING_TEXT_TOP_PADDING_DP = 300
+private const val SCANNING_FRAME_STROKE_WIDTH_DP = 4
+private const val QR_PREVIEW_LENGTH = 50
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
@@ -42,32 +70,56 @@ fun QrScannerScreen(
     if (hasCameraPermission) {
         val scanStateRef = remember { ScanState() }
         
+        // Store camera provider and executor for cleanup
+        val cameraProviderState = remember { mutableStateOf<ProcessCameraProvider?>(null) }
+        val executorState = remember { mutableStateOf<java.util.concurrent.ExecutorService?>(null) }
+        
+        // Cleanup camera when composable is removed
+        DisposableEffect(Unit) {
+            onDispose {
+                // Unbind camera before surface is destroyed
+                cameraProviderState.value?.unbindAll()
+                executorState.value?.shutdown()
+            }
+        }
+        
         AndroidView(
             factory = { ctx ->
                 val previewView = PreviewView(ctx)
                 val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                val barcodeScanner = BarcodeScanning.getClient()
 
                 cameraProviderFuture.addListener({
                     try {
-                        val cameraProvider = cameraProviderFuture.get()
+                        val provider = cameraProviderFuture.get()
+                        cameraProviderState.value = provider
 
+                        // Configure barcode scanner to only scan QR codes for better performance
+                        val barcodeOptions = com.google.mlkit.vision.barcode.BarcodeScannerOptions.Builder()
+                            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                            .build()
+                        val qrCodeScanner = BarcodeScanning.getClient(barcodeOptions)
+
+                        // Use background executor for image analysis to avoid blocking main thread
+                        val analysisExecutor = Executors.newSingleThreadExecutor()
+                        executorState.value = analysisExecutor
+                        
                         val imageAnalysis = ImageAnalysis.Builder()
+                            .setTargetResolution(Size(1280, 720)) // Optimal resolution for QR code scanning (max 2MP)
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                             .build()
                             .also {
-                                it.setAnalyzer(ContextCompat.getMainExecutor(ctx)) { imageProxy ->
+                                it.setAnalyzer(analysisExecutor) { imageProxy ->
                                     processImageProxy(
                                         imageProxy,
-                                        barcodeScanner,
+                                        qrCodeScanner,
                                         scanStateRef,
                                         onScanSuccess
                                     )
                                 }
                             }
 
-                        cameraProvider.unbindAll()
-                        cameraProvider.bindToLifecycle(
+                        provider.unbindAll()
+                        provider.bindToLifecycle(
                             lifecycleOwner,
                             CameraSelector.DEFAULT_BACK_CAMERA,
                             Preview.Builder().build().also {
@@ -87,7 +139,9 @@ fun QrScannerScreen(
 
         // Overlay (Scanning Frame + Close Button)
         Box(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding(),
             contentAlignment = Alignment.Center
         ) {
             // Close button at top
@@ -95,37 +149,40 @@ fun QrScannerScreen(
                 onClick = onDismiss,
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .padding(16.dp)
+                    .padding(16.dp) // Keep 16.dp for padding, not a scanning-specific constant
             ) {
                 Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Close",
-                    tint = Color.White
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = stringResource(R.string.ui_close),
+                    tint = QRScannerOverlayWhite
                 )
             }
             
             // Scanning frame
-            Canvas(modifier = Modifier.size(250.dp)) {
+            Canvas(modifier = Modifier.size(SCANNING_FRAME_SIZE_DP.dp)) {
                 drawRect(
-                    color = Color.White,
-                    style = Stroke(width = 4.dp.toPx())
+                    color = QRScannerOverlayWhite,
+                    style = Stroke(width = SCANNING_FRAME_STROKE_WIDTH_DP.dp.toPx())
                 )
             }
             Text(
-                text = "Scan PC QR Code",
-                color = Color.White,
-                modifier = Modifier.padding(top = 300.dp)
+                text = stringResource(R.string.ui_scan_pc_qr_code),
+                color = QRScannerOverlayWhite,
+                modifier = Modifier.padding(top = SCANNING_TEXT_TOP_PADDING_DP.dp)
             )
         }
     } else {
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text("Camera permission required")
+            Text(stringResource(R.string.ui_camera_permission_required))
             Button(onClick = { cameraPermissionState.launchPermissionRequest() }) {
-                Text("Grant Permission")
+                Text(stringResource(R.string.ui_grant_permission))
             }
         }
     }
@@ -154,14 +211,20 @@ private fun processImageProxy(
             imageProxy.imageInfo.rotationDegrees
         )
 
+        // Handler to post results to main thread for UI updates
+        val mainHandler = Handler(Looper.getMainLooper())
+
         barcodeScanner.process(image)
             .addOnSuccessListener { barcodes ->
                 for (barcode in barcodes) {
                     barcode.rawValue?.let { qrData ->
                         if (!scanState.hasScanned) {
                             scanState.hasScanned = true
-                            Timber.d("QR code scanned: ${qrData.take(50)}...")
-                            onScanSuccess(qrData)
+                            Timber.d("QR code scanned: ${qrData.take(QR_PREVIEW_LENGTH)}...")
+                            // Post to main thread to ensure UI updates happen on correct thread
+                            mainHandler.post {
+                                onScanSuccess(qrData)
+                            }
                         }
                     }
                 }

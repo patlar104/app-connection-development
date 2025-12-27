@@ -19,18 +19,21 @@ class MainViewModel @Inject constructor(
     private val webSocketClient: WebSocketClient,
     private val pairingManager: PairingManager
 ) : ViewModel() {
+    companion object {
+        const val STATE_FLOW_SUBSCRIPTION_TIMEOUT_MS = 5000L
+    }
 
     val clipboardItems = repository.getAllClipboardItems()
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = SharingStarted.WhileSubscribed(STATE_FLOW_SUBSCRIPTION_TIMEOUT_MS),
             initialValue = emptyList()
         )
 
     val connectionState = webSocketClient.connectionState
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = SharingStarted.WhileSubscribed(STATE_FLOW_SUBSCRIPTION_TIMEOUT_MS),
             initialValue = WebSocketClient.ConnectionState.Disconnected
         )
     

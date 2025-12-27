@@ -16,6 +16,13 @@ val AppOnPrimary = Color(0xFFFFFFFF)
 val AppPrimaryContainer = Color(0xFFEADDFF)
 val AppOnPrimaryContainer = Color(0xFF21005D)
 
+// Connection status colors
+val ConnectionStatusConnected = Color(0xFF4CAF50)
+val ConnectionStatusConnecting = Color(0xFFFFC107)
+val ConnectionStatusDisconnecting = Color(0xFFFF9800)
+val ConnectionStatusDisconnected = Color(0xFFF44336)
+val QRScannerOverlayWhite = Color.White
+
 @Composable
 fun appColorScheme(
     darkTheme: Boolean = isSystemInDarkTheme(),

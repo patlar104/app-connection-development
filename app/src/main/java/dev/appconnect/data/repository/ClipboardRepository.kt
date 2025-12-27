@@ -1,6 +1,7 @@
 package dev.appconnect.data.repository
 
 import dev.appconnect.core.encryption.EncryptionManager
+import dev.appconnect.core.util.EncryptedDataSerializer
 import dev.appconnect.data.local.database.dao.ClipboardItemDao
 import dev.appconnect.data.local.database.dao.PairedDeviceDao
 import dev.appconnect.data.local.database.entity.ClipboardItemEntity
@@ -8,6 +9,7 @@ import dev.appconnect.data.local.database.entity.PairedDeviceEntity
 import dev.appconnect.domain.model.ClipboardItem
 import dev.appconnect.domain.model.ContentType
 import dev.appconnect.domain.model.Device
+import dev.appconnect.R
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import timber.log.Timber
@@ -95,11 +97,12 @@ class ClipboardRepository @Inject constructor(
 // Extension functions for conversions
 private fun ClipboardItemEntity.toDomainModel(encryptionManager: EncryptionManager): ClipboardItem {
     val decryptedContent = try {
-        val encryptedData = parseEncryptedData(content)
+        val encryptedData = EncryptedDataSerializer.parse(content)
         encryptionManager.decrypt(encryptedData)
     } catch (e: Exception) {
-        Timber.e(e, "Failed to decrypt clipboard item")
-        ""
+        Timber.e(e, "Failed to decrypt clipboard item: $id")
+        // Return placeholder to indicate decryption failure instead of silent empty string
+        "[Decryption Failed]"
     }
 
     return ClipboardItem(
@@ -116,7 +119,7 @@ private fun ClipboardItemEntity.toDomainModel(encryptionManager: EncryptionManag
 
 private fun ClipboardItem.toEntity(encryptionManager: EncryptionManager): ClipboardItemEntity {
     val encryptedData = encryptionManager.encrypt(content)
-    val encryptedContent = serializeEncryptedData(encryptedData)
+    val encryptedContent = EncryptedDataSerializer.serialize(encryptedData)
 
     return ClipboardItemEntity(
         id = id,
@@ -156,23 +159,4 @@ private fun Device.toEntity(): PairedDeviceEntity {
     )
 }
 
-// Simple serialization for encrypted data (base64 encoding)
-private fun serializeEncryptedData(data: dev.appconnect.core.encryption.EncryptedData): String {
-    val ivBase64 = android.util.Base64.encodeToString(data.iv, android.util.Base64.NO_WRAP)
-    val encryptedBase64 = android.util.Base64.encodeToString(data.encryptedBytes, android.util.Base64.NO_WRAP)
-    return "$ivBase64|$encryptedBase64"
-}
-
-private fun parseEncryptedData(serialized: String): dev.appconnect.core.encryption.EncryptedData {
-    val parts = serialized.split("|")
-    if (parts.size != 2) {
-        throw IllegalArgumentException("Invalid encrypted data format")
-    }
-    val iv = android.util.Base64.decode(parts[0], android.util.Base64.NO_WRAP)
-    val encryptedBytes = android.util.Base64.decode(parts[1], android.util.Base64.NO_WRAP)
-    return dev.appconnect.core.encryption.EncryptedData(
-        encryptedBytes = encryptedBytes,
-        iv = iv
-    )
-}
 

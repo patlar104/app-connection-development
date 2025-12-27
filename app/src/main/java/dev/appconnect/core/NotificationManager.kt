@@ -1,12 +1,15 @@
 package dev.appconnect.core
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.appconnect.R
 import dev.appconnect.domain.model.ClipboardItem
@@ -27,6 +30,14 @@ class NotificationManager @Inject constructor(
         private const val CHANNEL_NAME = "Clipboard Sync"
         const val ACTION_COPY_FROM_PC = "dev.appconnect.COPY_FROM_PC"
         const val EXTRA_CLIPBOARD_ID = "clipboard_id"
+        
+        // Service actions (moved from ClipboardSyncService)
+        const val ACTION_START_SYNC = "dev.appconnect.START_SYNC"
+        const val ACTION_STOP_SYNC = "dev.appconnect.STOP_SYNC"
+        
+        // Network timeouts
+        const val CONNECTION_TIMEOUT_MS = 10000L
+        const val SOCKET_TIMEOUT_MS = 10000L
     }
 
     init {
@@ -45,8 +56,28 @@ class NotificationManager @Inject constructor(
             notificationManager.createNotificationChannel(channel)
         }
     }
+    
+    /**
+     * Checks if the app has permission to post notifications on Android 13+ (API 33+).
+     * @return true if permission is granted or not required (Android 12 and below), false otherwise
+     */
+    private fun hasNotificationPermission(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+        return true // Permission not required on Android 12 and below
+    }
 
     fun showCopyNotification(clipboardItem: ClipboardItem, notificationId: Int) {
+        // Check for POST_NOTIFICATIONS permission on Android 13+
+        if (!hasNotificationPermission()) {
+            Timber.w("POST_NOTIFICATIONS permission not granted, cannot show notification")
+            return
+        }
+        
         val intent = Intent(context, CopyActionReceiver::class.java).apply {
             putExtra(EXTRA_CLIPBOARD_ID, clipboardItem.id)
             action = ACTION_COPY_FROM_PC
@@ -61,10 +92,10 @@ class NotificationManager @Inject constructor(
         val pendingIntent = PendingIntent.getBroadcast(context, 0, intent, flags)
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setContentTitle("Clipboard from PC")
+            .setContentTitle(context.getString(R.string.notification_clipboard_from_pc))
             .setContentText(clipboardItem.previewText)
             .setSmallIcon(R.drawable.ic_clipboard_notification)
-            .addAction(R.drawable.ic_clipboard_notification, "Copy", pendingIntent)
+            .addAction(R.drawable.ic_clipboard_notification, context.getString(R.string.notification_action_copy), pendingIntent)
             .setAutoCancel(true)
             .build()
 
@@ -77,6 +108,12 @@ class NotificationManager @Inject constructor(
         content: String,
         notificationId: Int
     ) {
+        // Check for POST_NOTIFICATIONS permission on Android 13+
+        if (!hasNotificationPermission()) {
+            Timber.w("POST_NOTIFICATIONS permission not granted, cannot show notification")
+            return
+        }
+        
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(content)

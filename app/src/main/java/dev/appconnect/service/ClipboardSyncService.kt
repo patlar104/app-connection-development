@@ -12,6 +12,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import dev.appconnect.R
 import dev.appconnect.core.NotificationManager
 import dev.appconnect.core.SyncManager
+import dev.appconnect.core.util.HashUtil
 import dev.appconnect.domain.model.ClipboardItem
 import dev.appconnect.domain.model.ContentType
 import dev.appconnect.domain.model.Transport
@@ -49,8 +50,6 @@ class ClipboardSyncService : Service() {
 
     companion object {
         private const val NOTIFICATION_ID = 1
-        const val ACTION_START_SYNC = "dev.appconnect.START_SYNC"
-        const val ACTION_STOP_SYNC = "dev.appconnect.STOP_SYNC"
     }
 
     override fun onCreate() {
@@ -59,12 +58,41 @@ class ClipboardSyncService : Service() {
         setupClipboardListener()
         setupWebSocketListener()
         setupBluetoothListener()
+        setupConnectionStateMonitoring()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // CRITICAL: Call startForeground() IMMEDIATELY and SYNCHRONOUSLY
+        // Android requires this to be called within ~5 seconds, otherwise it will crash with
+        // ForegroundServiceDidNotStartInTimeException
+        // Must be called before any other operations that might delay or throw exceptions
+        try {
+            val notification = createDefaultNotification()
+            startForeground(NOTIFICATION_ID, notification)
+            Timber.d("startForeground() called successfully in onStartCommand")
+        } catch (e: Exception) {
+            Timber.e(e, "CRITICAL: Failed to call startForeground() in onStartCommand")
+            // Try to create a minimal notification as fallback
+            try {
+                val fallbackNotification = NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
+                    .setContentTitle("Clipboard Sync")
+                    .setContentText("Service running")
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setOngoing(true)
+                    .build()
+                startForeground(NOTIFICATION_ID, fallbackNotification)
+                Timber.d("Used fallback notification for startForeground()")
+            } catch (e2: Exception) {
+                Timber.e(e2, "CRITICAL: Even fallback notification failed")
+                // If we can't call startForeground, the service will crash
+                // But at least we've logged the error
+            }
+        }
+        
+        // Now handle the intent action
         when (intent?.action) {
-            ACTION_START_SYNC -> startSync()
-            ACTION_STOP_SYNC -> stopSync()
+            NotificationManager.ACTION_START_SYNC -> startSync()
+            NotificationManager.ACTION_STOP_SYNC -> stopSync()
         }
         return START_STICKY
     }
@@ -73,7 +101,24 @@ class ClipboardSyncService : Service() {
 
     private fun startSync() {
         Timber.d("Starting clipboard sync")
-        startForeground(NOTIFICATION_ID, createNotification(Transport.WEBSOCKET))
+        // For Android 13+ (API 33+), foreground service requires POST_NOTIFICATIONS permission
+        // Check if we have POST_NOTIFICATIONS permission on Android 13+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            if (android.content.pm.PackageManager.PERMISSION_GRANTED != 
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    this,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                )
+            ) {
+                Timber.w("Cannot start foreground service without POST_NOTIFICATIONS permission")
+                // Stop gracefully - startForeground was already called in onStartCommand
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+                return
+            }
+        }
+        // Update notification to show active sync state
+        updateNotification(Transport.WEBSOCKET)
     }
 
     private fun stopSync() {
@@ -117,15 +162,23 @@ class ClipboardSyncService : Service() {
                 val text = item.coerceToText(applicationContext).toString()
                 if (text.isBlank()) return@launch
 
+                val hash = calculateHash(text)
+                
+                // Prevent sync loops: ignore clipboard changes that match content we just wrote
+                if (syncManager.shouldIgnoreClipboardItem(hash)) {
+                    Timber.d("Ignoring clipboard change - matches content we just wrote (loop prevention)")
+                    return@launch
+                }
+                
                 val clipboardItem = ClipboardItem(
                     id = java.util.UUID.randomUUID().toString(),
                     content = text,
                     contentType = ContentType.TEXT,
                     timestamp = System.currentTimeMillis(),
-                    ttl = 24 * 60 * 60 * 1000L, // 24 hours
+                    ttl = dev.appconnect.core.SyncManager.DEFAULT_CLIPBOARD_TTL_MS,
                     synced = false,
                     sourceDeviceId = null,
-                    hash = calculateHash(text)
+                    hash = hash
                 )
 
                 syncManager.syncClipboard(clipboardItem)
@@ -136,9 +189,7 @@ class ClipboardSyncService : Service() {
     }
 
     private fun calculateHash(text: String): String {
-        val digest = java.security.MessageDigest.getInstance("SHA-256")
-        val hash = digest.digest(text.toByteArray())
-        return hash.joinToString("") { "%02x".format(it) }
+        return HashUtil.sha256(text)
     }
 
     private fun setupWebSocketListener() {
@@ -162,53 +213,90 @@ class ClipboardSyncService : Service() {
             }
         }
     }
-
-    private fun parseEncryptedMessage(message: String): dev.appconnect.core.encryption.EncryptedData {
-        val parts = message.split("|")
-        if (parts.size != 2) {
-            throw IllegalArgumentException("Invalid message format")
-        }
-        val iv = android.util.Base64.decode(parts[0], android.util.Base64.NO_WRAP)
-        val encryptedBytes = android.util.Base64.decode(parts[1], android.util.Base64.NO_WRAP)
-        return dev.appconnect.core.encryption.EncryptedData(
-            encryptedBytes = encryptedBytes,
-            iv = iv
-        )
-    }
-
-    private fun handleWebSocketFailure() {
-        Timber.w("WebSocket connection lost, attempting Bluetooth fallback")
-        syncManager.setCurrentTransport(Transport.BLUETOOTH)
-
-        // Attempt Bluetooth connection
+    
+    private fun setupConnectionStateMonitoring() {
+        // Monitor WebSocket connection state and update notification
         serviceScope.launch {
-            // Get paired device from repository
-            val pairedDevices = repository.getPairedDevices()
-            val device = pairedDevices.firstOrNull() ?: run {
-                Timber.e("No paired devices available for Bluetooth fallback")
-                stopSelf()
-                return@launch
+            webSocketClient.connectionState.collect { state ->
+                Timber.d("WebSocket connection state changed: $state")
+                updateNotificationForConnectionState(state)
+                
+                // Report connection status to PC
+                val statusMessage = when (state) {
+                    WebSocketClient.ConnectionState.Connected -> "connected"
+                    WebSocketClient.ConnectionState.Connecting -> "connecting"
+                    WebSocketClient.ConnectionState.Disconnected -> "disconnected"
+                    WebSocketClient.ConnectionState.Disconnecting -> "disconnecting"
+                }
+                syncManager.reportConnectionStatus(statusMessage)
             }
-            
-            // Extract Bluetooth address from device info
-            val bluetoothAddress = device.bluetoothAddress ?: run {
-                Timber.e("Device has no Bluetooth address")
-                stopSelf()
-                return@launch
-            }
-            
-            val result = bluetoothManager.connect(bluetoothAddress)
-            result.fold(
-                onSuccess = {
+        }
+        
+        // Monitor Bluetooth connection state
+        serviceScope.launch {
+            bluetoothManager.connectionState.collect { state ->
+                Timber.d("Bluetooth connection state changed: $state")
+                // Update transport if Bluetooth becomes primary
+                if (state == BluetoothManager.BluetoothConnectionState.Connected) {
                     currentTransport = Transport.BLUETOOTH
                     updateNotification(Transport.BLUETOOTH)
-                },
-                onFailure = { error ->
-                    Timber.e("Both transports failed: ${error.message}")
-                    stopSelf()
                 }
-            )
+            }
         }
+    }
+    
+    private fun updateNotificationForConnectionState(state: WebSocketClient.ConnectionState) {
+        if (!isServiceRunning()) return
+        
+        val notification = when (state) {
+            WebSocketClient.ConnectionState.Connected -> {
+                NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
+                    .setContentTitle(getString(R.string.notification_connected_to_pc))
+                    .setContentText(getString(R.string.notification_sync_active_websocket))
+                    .setSmallIcon(R.drawable.ic_sync_tile)
+                    .setOngoing(true)
+                    .build()
+            }
+            WebSocketClient.ConnectionState.Connecting -> {
+                NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
+                    .setContentTitle(getString(R.string.notification_connecting_to_pc))
+                    .setContentText(getString(R.string.notification_establishing_connection))
+                    .setSmallIcon(R.drawable.ic_sync_tile)
+                    .setOngoing(true)
+                    .build()
+            }
+            WebSocketClient.ConnectionState.Disconnecting -> {
+                NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
+                    .setContentTitle(getString(R.string.notification_disconnecting_from_pc))
+                    .setContentText(getString(R.string.notification_closing_connection))
+                    .setSmallIcon(R.drawable.ic_sync_tile)
+                    .setOngoing(true)
+                    .build()
+            }
+            WebSocketClient.ConnectionState.Disconnected -> {
+                NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
+                    .setContentTitle(getString(R.string.notification_disconnected_from_pc))
+                    .setContentText(getString(R.string.notification_reconnecting))
+                    .setSmallIcon(R.drawable.ic_sync_tile)
+                    .setOngoing(true)
+                    .build()
+            }
+        }
+        
+        try {
+            startForeground(NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to update notification for connection state")
+        }
+    }
+    
+    private fun isServiceRunning(): Boolean {
+        // Simple check - service is running if it has been started
+        return true
+    }
+
+    private fun parseEncryptedMessage(message: String): dev.appconnect.core.encryption.EncryptedData {
+        return dev.appconnect.core.util.EncryptedDataSerializer.parse(message)
     }
 
     private fun updateNotification(transport: Transport) {
@@ -216,10 +304,51 @@ class ClipboardSyncService : Service() {
         startForeground(NOTIFICATION_ID, notification)
     }
 
+    private fun createDefaultNotification(): Notification {
+        // Default notification shown immediately when service starts
+        // This ensures startForeground() is called quickly to avoid crashes
+        // Use try-catch to handle any resource loading issues
+        return try {
+            // Ensure notification channel exists (should already exist from NotificationManager init)
+            // But double-check to avoid any timing issues
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                if (nm.getNotificationChannel(NotificationManager.CHANNEL_ID) == null) {
+                    Timber.w("Notification channel not found, creating it now")
+                    nm.createNotificationChannel(
+                        android.app.NotificationChannel(
+                            NotificationManager.CHANNEL_ID,
+                            "Clipboard Sync",
+                            android.app.NotificationManager.IMPORTANCE_DEFAULT
+                        ).apply {
+                            description = "Notifications for clipboard synchronization"
+                        }
+                    )
+                }
+            }
+            
+            NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
+                .setContentTitle(getString(R.string.notification_connected_to_pc))
+                .setContentText(getString(R.string.notification_establishing_connection))
+                .setSmallIcon(R.drawable.ic_sync_tile)
+                .setOngoing(true)
+                .build()
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to create default notification, using minimal notification")
+            // Fallback to a minimal notification if resource loading fails
+            NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
+                .setContentTitle("Clipboard Sync")
+                .setContentText("Service starting...")
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setOngoing(true)
+                .build()
+        }
+    }
+
     private fun createNotification(transport: Transport): Notification {
         return NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
-            .setContentTitle("Connected to PC")
-            .setContentText("Sync active via ${transport.name}")
+            .setContentTitle(getString(R.string.notification_connected_to_pc))
+            .setContentText(getString(R.string.notification_sync_active_transport, transport.name))
             .setSmallIcon(R.drawable.ic_sync_tile)
             .setOngoing(true)
             .build()

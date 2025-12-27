@@ -62,7 +62,8 @@ def test_qr_generation():
     )
     qr_gen.ensure_rsa_key_exists()
     
-    connection_info = qr_gen.generate_qr_code()
+    # Use generate_qr_code with save_file=False for tests (no GUI needed)
+    connection_info = qr_gen.generate_qr_code(save_file=False)
     
     # Parse JSON
     info_dict = json.loads(connection_info)
@@ -77,7 +78,27 @@ def test_qr_generation():
     assert info_dict["p"] == config.port
     assert info_dict["fp"] == fingerprint
     
+    # Verify RSA public key format (should be DER bytes in Base64, not PEM)
+    public_key_b64 = info_dict["k"]
+    public_key_bytes = base64.b64decode(public_key_b64)
+    
+    # DER format should NOT contain PEM headers
+    public_key_str = public_key_bytes.decode('ascii', errors='ignore')
+    assert "BEGIN PUBLIC KEY" not in public_key_str, "Public key should be DER format, not PEM"
+    assert "END PUBLIC KEY" not in public_key_str, "Public key should be DER format, not PEM"
+    
+    # Verify it can be parsed as DER (Android will use X509EncodedKeySpec)
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    try:
+        # This simulates what Android does with X509EncodedKeySpec
+        public_key = serialization.load_der_public_key(public_key_bytes)
+        assert isinstance(public_key, rsa.RSAPublicKey), "Should be a valid RSA public key"
+    except Exception as e:
+        assert False, f"Failed to parse public key as DER format: {e}"
+    
     print("  [OK] QR code generation works")
+    print("  [OK] RSA public key is in correct DER format")
     return qr_gen
 
 

@@ -7,6 +7,19 @@ import dev.appconnect.core.SyncManager
 import timber.log.Timber
 import javax.inject.Inject
 
+/**
+ * AccessibilityService for monitoring clipboard changes.
+ * 
+ * TODO: This is an incomplete implementation.
+ * Currently, the app uses ClipboardSyncService for clipboard monitoring.
+ * This service is declared in AndroidManifest but not fully implemented.
+ * 
+ * Future implementation should:
+ * - Properly monitor clipboard changes via accessibility events
+ * - Read clipboard content when changes are detected
+ * - Sync clipboard items via SyncManager
+ * - Handle edge cases and permissions properly
+ */
 @AndroidEntryPoint
 class ClipboardAccessibilityService : AccessibilityService() {
 

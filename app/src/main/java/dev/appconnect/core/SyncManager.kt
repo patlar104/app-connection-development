@@ -1,17 +1,21 @@
 package dev.appconnect.core
 
 import android.app.ActivityManager
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.appconnect.core.encryption.EncryptedData
 import dev.appconnect.core.encryption.EncryptionManager
+import dev.appconnect.core.util.EncryptedDataSerializer
 import dev.appconnect.data.repository.ClipboardRepository
 import dev.appconnect.domain.model.ClipboardItem
 import dev.appconnect.domain.model.ContentType
 import dev.appconnect.domain.model.Transport
 import dev.appconnect.network.BluetoothManager
 import dev.appconnect.network.WebSocketClient
+import dev.appconnect.R
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CoroutineScope
@@ -33,9 +37,18 @@ class SyncManager @Inject constructor(
     private val bluetoothManager: BluetoothManager,
     private val notificationManager: NotificationManager
 ) {
+    companion object {
+        const val DEFAULT_CLIPBOARD_TTL_MS = 24L * 60 * 60 * 1000 // 24 hours
+        const val NOTIFICATION_DEBOUNCE_MS = 500L
+        const val PREVIEW_TEXT_LENGTH = 50
+        const val LOG_MESSAGE_PREVIEW_LENGTH = 50
+        const val NOTIFICATION_ID_CLIPBOARD_COPY = 1001
+    }
+    
     private var pendingNotificationJob: Job? = null
     private var pendingClipboardItem: ClipboardItem? = null
-    private val notificationId = 1001 // Single notification ID for all clipboard notifications
+    private var lastWrittenHash: String? = null
+    private var lastWrittenTime: Long = 0
 
     private var currentTransport: Transport = Transport.WEBSOCKET
 
@@ -52,7 +65,7 @@ class SyncManager @Inject constructor(
             // Show toast and abort
             Toast.makeText(
                 context,
-                "Connect to Wi-Fi to sync image",
+                context.getString(dev.appconnect.R.string.error_wifi_required_for_image_sync),
                 Toast.LENGTH_LONG
             ).show()
             Timber.w("Image sync attempted over Bluetooth - blocked")
@@ -66,12 +79,25 @@ class SyncManager @Inject constructor(
         if (clipboardItem.contentType == ContentType.TEXT) {
             return when (currentTransport) {
                 Transport.WEBSOCKET -> {
-                    val encrypted = encryptClipboardItem(clipboardItem)
+                    // Use session encryption if available, otherwise fall back to local encryption
+                    val sessionEncryption = webSocketClient.getSessionEncryption()
+                    val encrypted = if (sessionEncryption != null) {
+                        val json = serializeClipboardItem(clipboardItem)
+                        sessionEncryption.encrypt(json)
+                    } else {
+                        Timber.w("Session encryption not available, using local encryption")
+                        encryptClipboardItem(clipboardItem)
+                    }
+                    
                     val message = serializeForTransmission(encrypted)
                     if (webSocketClient.send(message)) {
                         repository.markAsSynced(clipboardItem.id)
+                        // Report success
+                        reportClipboardSyncResult(true, clipboardItem.id, "Sent via WebSocket")
                         kotlin.Result.success(true)
                     } else {
+                        // Report failure
+                        reportError("send_failed", "WebSocket send failed for clipboard item ${clipboardItem.id}", null)
                         kotlin.Result.failure(Exception("WebSocket send failed"))
                     }
                 }
@@ -95,7 +121,7 @@ class SyncManager @Inject constructor(
             if (currentTransport != Transport.WEBSOCKET) {
                 Toast.makeText(
                     context,
-                    "Wi-Fi required for image sync",
+                    context.getString(dev.appconnect.R.string.error_wifi_required_for_image_sync_short),
                     Toast.LENGTH_LONG
                 ).show()
                 return kotlin.Result.failure(Exception("Wi-Fi required for image sync"))
@@ -120,7 +146,15 @@ class SyncManager @Inject constructor(
     fun handleIncomingClipboard(data: EncryptedData) {
         handlerScope.launch {
             try {
-                val decrypted = encryptionManager.decrypt(data)
+                // Use session encryption if available, otherwise fall back to local encryption
+                val sessionEncryption = webSocketClient.getSessionEncryption()
+                val decrypted = if (sessionEncryption != null) {
+                    sessionEncryption.decrypt(data)
+                } else {
+                    Timber.w("Session encryption not available, using local encryption")
+                    encryptionManager.decrypt(data)
+                }
+                
                 // Parse the decrypted JSON to get ClipboardItem
                 val clipboardItem = parseFromTransmission(decrypted)
                 repository.saveClipboardItem(clipboardItem)
@@ -128,12 +162,18 @@ class SyncManager @Inject constructor(
                 if (isAppInForeground()) {
                     // Direct write - app has focus
                     writeToClipboard(clipboardItem)
+                    // Report success
+                    reportClipboardSyncResult(true, clipboardItem.id, "Written to clipboard")
                 } else {
                     // Background: debounce and show notification with action
                     debounceNotification(clipboardItem)
+                    // Report success (notification shown)
+                    reportClipboardSyncResult(true, clipboardItem.id, "Notification shown")
                 }
             } catch (e: Exception) {
                 Timber.e(e, "Failed to handle incoming clipboard")
+                // Report error
+                reportError("decryption_failed", "Failed to handle incoming clipboard: ${e.message}", e)
             }
         }
     }
@@ -145,11 +185,11 @@ class SyncManager @Inject constructor(
         // Store the latest clipboard item
         pendingClipboardItem = clipboardItem
 
-        // Schedule notification after 500ms debounce
+        // Schedule notification after debounce delay
         pendingNotificationJob = handlerScope.launch {
-            delay(500)
+            delay(NOTIFICATION_DEBOUNCE_MS)
             pendingClipboardItem?.let { item ->
-                notificationManager.showCopyNotification(item, notificationId)
+                notificationManager.showCopyNotification(item, NOTIFICATION_ID_CLIPBOARD_COPY)
                 pendingClipboardItem = null
             }
         }
@@ -183,9 +223,42 @@ class SyncManager @Inject constructor(
     }
 
     private fun writeToClipboard(clipboardItem: ClipboardItem) {
-        // This will be implemented by the service that calls SyncManager
-        // For now, just log
-        Timber.d("Writing to clipboard: ${clipboardItem.content.take(50)}")
+        try {
+            val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                ?: run {
+                    Timber.e("ClipboardManager not available")
+                    return
+                }
+            
+            // Create ClipData with the clipboard content
+            val clipData = ClipData.newPlainText(
+                context.getString(R.string.service_pc_clipboard_label),
+                clipboardItem.content
+            )
+            
+            // Set the clipboard content
+            clipboardManager.setPrimaryClip(clipData)
+            
+            // Track what we just wrote to prevent loop (ignore this hash for next 2 seconds)
+            lastWrittenHash = clipboardItem.hash
+            lastWrittenTime = System.currentTimeMillis()
+            
+            Timber.d("Successfully wrote to clipboard: ${clipboardItem.content.take(LOG_MESSAGE_PREVIEW_LENGTH)}")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to write to clipboard: ${clipboardItem.content.take(LOG_MESSAGE_PREVIEW_LENGTH)}")
+            // Report error to PC
+            reportError("clipboard_write_failed", "Failed to write clipboard on Android: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Check if a clipboard item should be ignored to prevent sync loops.
+     * Returns true if the item matches content we just wrote to clipboard.
+     */
+    fun shouldIgnoreClipboardItem(hash: String): Boolean {
+        val now = System.currentTimeMillis()
+        // Ignore items with the same hash as what we wrote in the last 2 seconds
+        return lastWrittenHash == hash && (now - lastWrittenTime) < 2000
     }
 
     private fun encryptClipboardItem(item: ClipboardItem): EncryptedData {
@@ -202,12 +275,58 @@ class SyncManager @Inject constructor(
     }
 
     private fun serializeForTransmission(encrypted: EncryptedData): String {
-        val ivBase64 = android.util.Base64.encodeToString(encrypted.iv, android.util.Base64.NO_WRAP)
-        val encryptedBase64 = android.util.Base64.encodeToString(
-            encrypted.encryptedBytes,
-            android.util.Base64.NO_WRAP
-        )
-        return "$ivBase64|$encryptedBase64"
+        return EncryptedDataSerializer.serialize(encrypted)
+    }
+    
+    /**
+     * Report error to PC server.
+     */
+    private fun reportError(errorType: String, message: String, exception: Exception?) {
+        try {
+            val details = mutableMapOf<String, Any>()
+            exception?.let {
+                details["exception_type"] = it.javaClass.simpleName
+                details["exception_message"] = it.message ?: "Unknown error"
+            }
+            
+            webSocketClient.sendErrorReport(errorType, message, details)
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to report error to PC")
+        }
+    }
+    
+    /**
+     * Report clipboard sync result to PC server.
+     */
+    private fun reportClipboardSyncResult(success: Boolean, clipboardId: String, message: String) {
+        try {
+            val result = mapOf(
+                "success" to success,
+                "clipboard_id" to clipboardId,
+                "message" to message,
+                "timestamp" to System.currentTimeMillis()
+            )
+            
+            // Send as error report with type clipboard_sync_result
+            webSocketClient.sendErrorReport(
+                if (success) "clipboard_sync_success" else "clipboard_sync_failed",
+                message,
+                result
+            )
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to report clipboard sync result")
+        }
+    }
+    
+    /**
+     * Report connection status to PC server.
+     */
+    fun reportConnectionStatus(status: String) {
+        try {
+            webSocketClient.sendConnectionStatus(status)
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to report connection status")
+        }
     }
 }
 

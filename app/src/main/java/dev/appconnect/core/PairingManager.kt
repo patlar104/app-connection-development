@@ -22,17 +22,28 @@ class PairingManager @Inject constructor(
     private val webSocketClient: WebSocketClient,
     private val cdmHelper: CompanionDeviceManagerHelper
 ) {
+    companion object {
+        const val SOCKET_CONNECT_TIMEOUT_MS = 10000L
+    }
+    
     // Use a shared executor that can be properly managed
-    // Note: In a production app, consider using a managed executor service
     private val executor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "PairingManager-Executor").apply {
             isDaemon = true
         }
     }
     
-    // Cleanup method for executor (called when app is destroyed or component removed)
-    // Note: This is a singleton, so the executor will live for app lifetime
-    // This is acceptable for a single-thread executor with daemon thread
+    // Cleanup method for executor
+    // Note: This is a singleton, so consider calling this when the app is being destroyed
+    // if you want to ensure graceful shutdown (though daemon threads will auto-terminate)
+    fun cleanup() {
+        try {
+            executor.shutdown()
+            Timber.d("PairingManager executor shut down")
+        } catch (e: Exception) {
+            Timber.w(e, "Error shutting down PairingManager executor")
+        }
+    }
 
     suspend fun pairFromQrCode(qrJson: String): kotlin.Result<Boolean> = withContext(Dispatchers.IO) {
         return@withContext try {
@@ -76,7 +87,7 @@ class PairingManager @Inject constructor(
             }
 
             // 5. Connect WebSocket
-            val connected = webSocketClient.connect(info.ip, info.port)
+            val connected = webSocketClient.connect(info.ip, info.port, info.publicKey)
             if (!connected) {
                 return@withContext kotlin.Result.failure(Exception("WebSocket connection failed"))
             }
@@ -93,7 +104,7 @@ class PairingManager @Inject constructor(
         var socket: Socket? = null
         return@withContext try {
             socket = Socket()
-            socket.connect(InetSocketAddress(ip, port), 3000)
+            socket.connect(InetSocketAddress(ip, port), SOCKET_CONNECT_TIMEOUT_MS.toInt())
             Timber.d("Device is reachable: $ip:$port")
             true
         } catch (e: Exception) {

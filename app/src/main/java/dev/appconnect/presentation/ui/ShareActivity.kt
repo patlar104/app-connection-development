@@ -1,11 +1,11 @@
-package dev.appconnect.ui
+package dev.appconnect.presentation.ui
 
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
 import dagger.hilt.android.AndroidEntryPoint
 import dev.appconnect.core.SyncManager
+import dev.appconnect.core.util.HashUtil
 import dev.appconnect.domain.model.ClipboardItem
 import dev.appconnect.domain.model.ContentType
 import kotlinx.coroutines.CoroutineScope
@@ -19,6 +19,9 @@ import javax.inject.Inject
 
 @AndroidEntryPoint
 class ShareActivity : ComponentActivity() {
+    companion object {
+        const val MIME_TYPE_TEXT_PLAIN = "text/plain"
+    }
 
     @Inject
     lateinit var syncManager: SyncManager
@@ -41,7 +44,7 @@ class ShareActivity : ComponentActivity() {
     private fun handleShareIntent(intent: Intent) {
         when (intent.action) {
             Intent.ACTION_SEND -> {
-                if (intent.type == "text/plain") {
+                if (intent.type == MIME_TYPE_TEXT_PLAIN) {
                     val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
                     sharedText?.let { text ->
                         syncSharedText(text)
@@ -58,10 +61,10 @@ class ShareActivity : ComponentActivity() {
                 content = text,
                 contentType = ContentType.TEXT,
                 timestamp = System.currentTimeMillis(),
-                ttl = 24 * 60 * 60 * 1000L, // 24 hours
+                ttl = SyncManager.DEFAULT_CLIPBOARD_TTL_MS,
                 synced = false,
                 sourceDeviceId = null,
-                hash = calculateHash(text)
+                hash = HashUtil.sha256(text)
             )
 
             val result = syncManager.syncClipboard(clipboardItem)
@@ -74,12 +77,6 @@ class ShareActivity : ComponentActivity() {
                 }
             )
         }
-    }
-
-    private fun calculateHash(text: String): String {
-        val digest = java.security.MessageDigest.getInstance("SHA-256")
-        val hash = digest.digest(text.toByteArray())
-        return hash.joinToString("") { "%02x".format(it) }
     }
 }
 
