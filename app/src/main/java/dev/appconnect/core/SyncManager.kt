@@ -1,6 +1,8 @@
 package dev.appconnect.core
 
 import android.app.ActivityManager
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -45,6 +47,8 @@ class SyncManager @Inject constructor(
     
     private var pendingNotificationJob: Job? = null
     private var pendingClipboardItem: ClipboardItem? = null
+    private var lastWrittenHash: String? = null
+    private var lastWrittenTime: Long = 0
 
     private var currentTransport: Transport = Transport.WEBSOCKET
 
@@ -88,8 +92,12 @@ class SyncManager @Inject constructor(
                     val message = serializeForTransmission(encrypted)
                     if (webSocketClient.send(message)) {
                         repository.markAsSynced(clipboardItem.id)
+                        // Report success
+                        reportClipboardSyncResult(true, clipboardItem.id, "Sent via WebSocket")
                         kotlin.Result.success(true)
                     } else {
+                        // Report failure
+                        reportError("send_failed", "WebSocket send failed for clipboard item ${clipboardItem.id}", null)
                         kotlin.Result.failure(Exception("WebSocket send failed"))
                     }
                 }
@@ -154,12 +162,18 @@ class SyncManager @Inject constructor(
                 if (isAppInForeground()) {
                     // Direct write - app has focus
                     writeToClipboard(clipboardItem)
+                    // Report success
+                    reportClipboardSyncResult(true, clipboardItem.id, "Written to clipboard")
                 } else {
                     // Background: debounce and show notification with action
                     debounceNotification(clipboardItem)
+                    // Report success (notification shown)
+                    reportClipboardSyncResult(true, clipboardItem.id, "Notification shown")
                 }
             } catch (e: Exception) {
                 Timber.e(e, "Failed to handle incoming clipboard")
+                // Report error
+                reportError("decryption_failed", "Failed to handle incoming clipboard: ${e.message}", e)
             }
         }
     }
@@ -209,9 +223,42 @@ class SyncManager @Inject constructor(
     }
 
     private fun writeToClipboard(clipboardItem: ClipboardItem) {
-        // This will be implemented by the service that calls SyncManager
-        // For now, just log
-        Timber.d("Writing to clipboard: ${clipboardItem.content.take(LOG_MESSAGE_PREVIEW_LENGTH)}")
+        try {
+            val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                ?: run {
+                    Timber.e("ClipboardManager not available")
+                    return
+                }
+            
+            // Create ClipData with the clipboard content
+            val clipData = ClipData.newPlainText(
+                context.getString(R.string.service_pc_clipboard_label),
+                clipboardItem.content
+            )
+            
+            // Set the clipboard content
+            clipboardManager.setPrimaryClip(clipData)
+            
+            // Track what we just wrote to prevent loop (ignore this hash for next 2 seconds)
+            lastWrittenHash = clipboardItem.hash
+            lastWrittenTime = System.currentTimeMillis()
+            
+            Timber.d("Successfully wrote to clipboard: ${clipboardItem.content.take(LOG_MESSAGE_PREVIEW_LENGTH)}")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to write to clipboard: ${clipboardItem.content.take(LOG_MESSAGE_PREVIEW_LENGTH)}")
+            // Report error to PC
+            reportError("clipboard_write_failed", "Failed to write clipboard on Android: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Check if a clipboard item should be ignored to prevent sync loops.
+     * Returns true if the item matches content we just wrote to clipboard.
+     */
+    fun shouldIgnoreClipboardItem(hash: String): Boolean {
+        val now = System.currentTimeMillis()
+        // Ignore items with the same hash as what we wrote in the last 2 seconds
+        return lastWrittenHash == hash && (now - lastWrittenTime) < 2000
     }
 
     private fun encryptClipboardItem(item: ClipboardItem): EncryptedData {
@@ -229,6 +276,57 @@ class SyncManager @Inject constructor(
 
     private fun serializeForTransmission(encrypted: EncryptedData): String {
         return EncryptedDataSerializer.serialize(encrypted)
+    }
+    
+    /**
+     * Report error to PC server.
+     */
+    private fun reportError(errorType: String, message: String, exception: Exception?) {
+        try {
+            val details = mutableMapOf<String, Any>()
+            exception?.let {
+                details["exception_type"] = it.javaClass.simpleName
+                details["exception_message"] = it.message ?: "Unknown error"
+            }
+            
+            webSocketClient.sendErrorReport(errorType, message, details)
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to report error to PC")
+        }
+    }
+    
+    /**
+     * Report clipboard sync result to PC server.
+     */
+    private fun reportClipboardSyncResult(success: Boolean, clipboardId: String, message: String) {
+        try {
+            val result = mapOf(
+                "success" to success,
+                "clipboard_id" to clipboardId,
+                "message" to message,
+                "timestamp" to System.currentTimeMillis()
+            )
+            
+            // Send as error report with type clipboard_sync_result
+            webSocketClient.sendErrorReport(
+                if (success) "clipboard_sync_success" else "clipboard_sync_failed",
+                message,
+                result
+            )
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to report clipboard sync result")
+        }
+    }
+    
+    /**
+     * Report connection status to PC server.
+     */
+    fun reportConnectionStatus(status: String) {
+        try {
+            webSocketClient.sendConnectionStatus(status)
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to report connection status")
+        }
     }
 }
 

@@ -82,13 +82,15 @@ class EncryptionManager:
         """
         Encrypt and format for transmission: {ivBase64}|{encryptedBase64}
         
-        Uses NO_WRAP base64 encoding (no padding, no line breaks) to match Android.
+        Uses NO_WRAP base64 encoding (WITH padding, no line breaks) to match Android.
+        Android's Base64.NO_WRAP includes padding - it only removes line breaks.
         """
         iv, encrypted = self.encrypt(data)
         
-        # Base64 encode with NO_WRAP (no padding, no line breaks)
-        iv_b64 = base64.b64encode(iv).decode('ascii').rstrip('=')
-        encrypted_b64 = base64.b64encode(encrypted).decode('ascii').rstrip('=')
+        # Base64 encode with NO_WRAP (WITH padding, no line breaks)
+        # Android's Base64.NO_WRAP includes padding, so we must too
+        iv_b64 = base64.b64encode(iv).decode('ascii')
+        encrypted_b64 = base64.b64encode(encrypted).decode('ascii')
         
         return f"{iv_b64}|{encrypted_b64}"
         

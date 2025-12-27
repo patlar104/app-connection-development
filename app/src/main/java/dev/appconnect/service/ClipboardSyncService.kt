@@ -62,11 +62,34 @@ class ClipboardSyncService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // IMPORTANT: Call startForeground() immediately when service starts via startForegroundService()
+        // CRITICAL: Call startForeground() IMMEDIATELY and SYNCHRONOUSLY
         // Android requires this to be called within ~5 seconds, otherwise it will crash with
         // ForegroundServiceDidNotStartInTimeException
-        startForeground(NOTIFICATION_ID, createDefaultNotification())
+        // Must be called before any other operations that might delay or throw exceptions
+        try {
+            val notification = createDefaultNotification()
+            startForeground(NOTIFICATION_ID, notification)
+            Timber.d("startForeground() called successfully in onStartCommand")
+        } catch (e: Exception) {
+            Timber.e(e, "CRITICAL: Failed to call startForeground() in onStartCommand")
+            // Try to create a minimal notification as fallback
+            try {
+                val fallbackNotification = NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
+                    .setContentTitle("Clipboard Sync")
+                    .setContentText("Service running")
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setOngoing(true)
+                    .build()
+                startForeground(NOTIFICATION_ID, fallbackNotification)
+                Timber.d("Used fallback notification for startForeground()")
+            } catch (e2: Exception) {
+                Timber.e(e2, "CRITICAL: Even fallback notification failed")
+                // If we can't call startForeground, the service will crash
+                // But at least we've logged the error
+            }
+        }
         
+        // Now handle the intent action
         when (intent?.action) {
             NotificationManager.ACTION_START_SYNC -> startSync()
             NotificationManager.ACTION_STOP_SYNC -> stopSync()
@@ -139,6 +162,14 @@ class ClipboardSyncService : Service() {
                 val text = item.coerceToText(applicationContext).toString()
                 if (text.isBlank()) return@launch
 
+                val hash = calculateHash(text)
+                
+                // Prevent sync loops: ignore clipboard changes that match content we just wrote
+                if (syncManager.shouldIgnoreClipboardItem(hash)) {
+                    Timber.d("Ignoring clipboard change - matches content we just wrote (loop prevention)")
+                    return@launch
+                }
+                
                 val clipboardItem = ClipboardItem(
                     id = java.util.UUID.randomUUID().toString(),
                     content = text,
@@ -147,7 +178,7 @@ class ClipboardSyncService : Service() {
                     ttl = dev.appconnect.core.SyncManager.DEFAULT_CLIPBOARD_TTL_MS,
                     synced = false,
                     sourceDeviceId = null,
-                    hash = calculateHash(text)
+                    hash = hash
                 )
 
                 syncManager.syncClipboard(clipboardItem)
@@ -189,6 +220,15 @@ class ClipboardSyncService : Service() {
             webSocketClient.connectionState.collect { state ->
                 Timber.d("WebSocket connection state changed: $state")
                 updateNotificationForConnectionState(state)
+                
+                // Report connection status to PC
+                val statusMessage = when (state) {
+                    WebSocketClient.ConnectionState.Connected -> "connected"
+                    WebSocketClient.ConnectionState.Connecting -> "connecting"
+                    WebSocketClient.ConnectionState.Disconnected -> "disconnected"
+                    WebSocketClient.ConnectionState.Disconnecting -> "disconnecting"
+                }
+                syncManager.reportConnectionStatus(statusMessage)
             }
         }
         
@@ -267,12 +307,42 @@ class ClipboardSyncService : Service() {
     private fun createDefaultNotification(): Notification {
         // Default notification shown immediately when service starts
         // This ensures startForeground() is called quickly to avoid crashes
-        return NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
-            .setContentTitle(getString(R.string.notification_connected_to_pc))
-            .setContentText(getString(R.string.notification_establishing_connection))
-            .setSmallIcon(R.drawable.ic_sync_tile)
-            .setOngoing(true)
-            .build()
+        // Use try-catch to handle any resource loading issues
+        return try {
+            // Ensure notification channel exists (should already exist from NotificationManager init)
+            // But double-check to avoid any timing issues
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                if (nm.getNotificationChannel(NotificationManager.CHANNEL_ID) == null) {
+                    Timber.w("Notification channel not found, creating it now")
+                    nm.createNotificationChannel(
+                        android.app.NotificationChannel(
+                            NotificationManager.CHANNEL_ID,
+                            "Clipboard Sync",
+                            android.app.NotificationManager.IMPORTANCE_DEFAULT
+                        ).apply {
+                            description = "Notifications for clipboard synchronization"
+                        }
+                    )
+                }
+            }
+            
+            NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
+                .setContentTitle(getString(R.string.notification_connected_to_pc))
+                .setContentText(getString(R.string.notification_establishing_connection))
+                .setSmallIcon(R.drawable.ic_sync_tile)
+                .setOngoing(true)
+                .build()
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to create default notification, using minimal notification")
+            // Fallback to a minimal notification if resource loading fails
+            NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
+                .setContentTitle("Clipboard Sync")
+                .setContentText("Service starting...")
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setOngoing(true)
+                .build()
+        }
     }
 
     private fun createNotification(transport: Transport): Notification {

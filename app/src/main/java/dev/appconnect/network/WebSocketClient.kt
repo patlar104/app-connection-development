@@ -8,8 +8,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -41,15 +44,18 @@ class WebSocketClient @Inject constructor(
         // Message types
         const val MESSAGE_TYPE_KEY_EXCHANGE = "key_exchange"
         const val MESSAGE_TYPE_KEY_EXCHANGE_ACK = "key_exchange_ack"
+        const val MESSAGE_TYPE_ERROR_REPORT = "error_report"
+        const val MESSAGE_TYPE_CONNECTION_STATUS = "connection_status"
+        const val MESSAGE_TYPE_CLIPBOARD_SYNC_RESULT = "clipboard_sync_result"
         
         // Status values
         const val STATUS_OK = "ok"
         const val STATUS_ERROR = "error"
         
         // Network constants
-        const val MAX_RECONNECT_ATTEMPTS = 5
-        const val INITIAL_RECONNECT_DELAY_MS = 1000L
-        const val MAX_RECONNECT_DELAY_MS = 30000L
+        const val MAX_RECONNECT_ATTEMPTS = 10  // More attempts for mobile networks
+        const val INITIAL_RECONNECT_DELAY_MS = 2000L  // Start with 2 seconds (more lenient)
+        const val MAX_RECONNECT_DELAY_MS = 60000L  // Max 60 seconds (more lenient for mobile)
         
         // WebSocket close codes
         const val CLOSE_CODE_NORMAL = 1000
@@ -151,14 +157,71 @@ class WebSocketClient @Inject constructor(
     fun getSessionEncryption(): SessionEncryptionManager? = sessionEncryption
 
     fun send(message: String): Boolean {
-        val ws = webSocket ?: return false
+        val ws = webSocket ?: run {
+            Timber.w("Cannot send: WebSocket is null")
+            // Don't immediately reconnect - wait a bit to see if connection recovers
+            // Only reconnect if we've been disconnected for a while
+            if (shouldReconnect && _connectionState.value == ConnectionState.Disconnected) {
+                // Delay reconnection slightly to avoid rapid reconnection attempts
+                Thread {
+                    try {
+                        Thread.sleep(2000) // Wait 2 seconds
+                        if (shouldReconnect && webSocket == null) {
+                            Timber.d("Attempting reconnection due to null WebSocket")
+                            attemptReconnection()
+                        }
+                    } catch (e: InterruptedException) {
+                        Timber.w("Reconnection delay interrupted")
+                    }
+                }.start()
+            }
+            return false
+        }
+        
+        // Check if connection is ready
+        if (!keyExchangeCompleted) {
+            Timber.w("Cannot send: Key exchange not completed")
+            return false
+        }
+        
         val result = ws.send(message)
         if (result) {
             Timber.d("Sent WebSocket message: ${message.take(MESSAGE_PREVIEW_LENGTH)}")
         } else {
-            Timber.w("Failed to send WebSocket message")
+            Timber.w("Failed to send WebSocket message - connection may be dead")
+            // Don't immediately reconnect - give it a moment to recover
+            // The onFailure or onClosed callbacks will handle reconnection
+            if (shouldReconnect) {
+                // Delay reconnection slightly
+                Thread {
+                    try {
+                        Thread.sleep(3000) // Wait 3 seconds before reconnecting
+                        if (shouldReconnect && !result) {
+                            Timber.d("Attempting reconnection due to send failure after delay")
+                            attemptReconnection()
+                        }
+                    } catch (e: InterruptedException) {
+                        Timber.w("Reconnection delay interrupted")
+                    }
+                }.start()
+            }
         }
         return result
+    }
+    
+    /**
+     * Force reconnection attempt (useful for manual reconnection).
+     */
+    fun forceReconnect(): Boolean {
+        if (lastHost == null || lastPort == null) {
+            Timber.w("Cannot force reconnect: no connection details stored")
+            return false
+        }
+        
+        Timber.d("Force reconnecting...")
+        shouldReconnect = true
+        reconnectAttempts = 0  // Reset attempts for manual reconnection
+        return connect(lastHost!!, lastPort!!, pendingRsaPublicKey)
     }
 
     private fun createWebSocketListener(): WebSocketListener {
@@ -179,8 +242,30 @@ class WebSocketClient @Inject constructor(
                 if (!keyExchangeCompleted) {
                     handleKeyExchangeResponse(text)
                 } else {
-                    // Normal message handling
-                    messageListener?.invoke(text)
+                    // Check if this is a control message (error_report, connection_status, etc.)
+                    try {
+                        val json = Json.parseToJsonElement(text).jsonObject
+                        val type = json[JSON_KEY_TYPE]?.jsonPrimitive?.content
+                        
+                        when (type) {
+                            MESSAGE_TYPE_ERROR_REPORT -> {
+                                handleErrorReport(json)
+                                return  // Don't pass to message listener
+                            }
+                            MESSAGE_TYPE_CONNECTION_STATUS -> {
+                                handleConnectionStatus(json)
+                                return  // Don't pass to message listener
+                            }
+                            else -> {
+                                // Normal clipboard message - pass to listener
+                                messageListener?.invoke(text)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        // If parsing fails, assume it's a normal clipboard message
+                        Timber.w(e, "Failed to parse message type, treating as clipboard message")
+                        messageListener?.invoke(text)
+                    }
                 }
             }
 
@@ -201,10 +286,17 @@ class WebSocketClient @Inject constructor(
                 
                 // Only attempt reconnection if this was an unexpected closure
                 // Normal closures (code 1000) typically mean intentional disconnection
-                if (shouldReconnect && code != CLOSE_CODE_NORMAL) {
+                // Also don't reconnect for policy violations (key exchange failures, etc.)
+                if (shouldReconnect && code != CLOSE_CODE_NORMAL && code != CLOSE_CODE_POLICY_VIOLATION) {
+                    Timber.d("Unexpected closure (code $code), will attempt reconnection")
                     attemptReconnection()
                 } else {
-                    // Stop reconnection attempts for normal closures or if shouldReconnect is false
+                    // Stop reconnection attempts for normal closures or policy violations
+                    if (code == CLOSE_CODE_NORMAL) {
+                        Timber.d("Normal closure, not reconnecting")
+                    } else if (code == CLOSE_CODE_POLICY_VIOLATION) {
+                        Timber.w("Policy violation closure, not reconnecting (likely key exchange failure)")
+                    }
                     shouldReconnect = false
                 }
             }
@@ -238,7 +330,10 @@ class WebSocketClient @Inject constructor(
         }
         
         reconnectAttempts++
-        val delayMs = minOf(INITIAL_RECONNECT_DELAY_MS * (1 shl (reconnectAttempts - 1)), MAX_RECONNECT_DELAY_MS)
+        // Exponential backoff with jitter
+        val baseDelay = minOf(INITIAL_RECONNECT_DELAY_MS * (1 shl (reconnectAttempts - 1)), MAX_RECONNECT_DELAY_MS)
+        val jitter = (Math.random() * 1000).toLong() // Add up to 1 second jitter
+        val delayMs = baseDelay + jitter
         
         Timber.d("Reconnection attempt $reconnectAttempts/$MAX_RECONNECT_ATTEMPTS in ${delayMs}ms")
         
@@ -246,8 +341,8 @@ class WebSocketClient @Inject constructor(
         Thread {
             try {
                 Thread.sleep(delayMs)
-                if (shouldReconnect) {
-                    Timber.d("Attempting to reconnect...")
+                if (shouldReconnect && lastHost != null && lastPort != null) {
+                    Timber.d("Attempting to reconnect to $lastHost:$lastPort...")
                     connect(lastHost!!, lastPort!!, pendingRsaPublicKey)
                 }
             } catch (e: InterruptedException) {
@@ -297,7 +392,9 @@ class WebSocketClient @Inject constructor(
                 if (status == STATUS_OK) {
                     keyExchangeCompleted = true
                     _connectionState.value = ConnectionState.Connected
-                    Timber.d("Key exchange completed successfully")
+                    // Reset reconnection attempts on successful connection
+                    reconnectAttempts = 0
+                    Timber.d("Key exchange completed successfully - connection established")
                 } else {
                     val message = json[JSON_KEY_MESSAGE]?.jsonPrimitive?.content ?: "Unknown error"
                     Timber.e("Key exchange failed: $message")
@@ -307,6 +404,103 @@ class WebSocketClient @Inject constructor(
             }
         } catch (e: Exception) {
             Timber.e(e, "Failed to parse key exchange response")
+        }
+    }
+
+    private fun handleErrorReport(json: JsonObject) {
+        try {
+            val errorType = json["error_type"]?.jsonPrimitive?.content ?: "unknown"
+            val message = json["message"]?.jsonPrimitive?.content ?: "Unknown error"
+            val timestamp = try {
+                json["timestamp"]?.jsonPrimitive?.content?.toLongOrNull() ?: System.currentTimeMillis()
+            } catch (e: Exception) {
+                System.currentTimeMillis()
+            }
+            val details = json["details"]?.jsonObject
+            
+            Timber.e("Error report from PC: [$errorType] $message (timestamp: $timestamp)")
+            if (details != null) {
+                Timber.d("Error details: $details")
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to parse error report")
+        }
+    }
+    
+    private fun handleConnectionStatus(json: JsonObject) {
+        try {
+            val status = json["status"]?.jsonPrimitive?.content ?: "unknown"
+            val stats = json["stats"]?.jsonObject
+            
+            Timber.d("Connection status from PC: $status")
+            if (stats != null) {
+                val messagesSent = try {
+                    stats["messages_sent"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                } catch (e: Exception) {
+                    0
+                }
+                val messagesReceived = try {
+                    stats["messages_received"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                } catch (e: Exception) {
+                    0
+                }
+                val uptime = try {
+                    stats["uptime"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                } catch (e: Exception) {
+                    0
+                }
+                Timber.d("PC stats: sent=$messagesSent, received=$messagesReceived, uptime=${uptime}s")
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to parse connection status")
+        }
+    }
+    
+    /**
+     * Send error report to PC server.
+     */
+    fun sendErrorReport(errorType: String, message: String, details: Map<String, Any>? = null): Boolean {
+        if (!keyExchangeCompleted) {
+            Timber.w("Cannot send error report: key exchange not completed")
+            return false
+        }
+        
+        return try {
+            val errorReport = buildJsonObject {
+                put(JSON_KEY_TYPE, MESSAGE_TYPE_ERROR_REPORT)
+                put("error_type", errorType)
+                put("message", message)
+                put("timestamp", System.currentTimeMillis())
+                put("details", details?.let { Json.encodeToJsonElement(it) } ?: buildJsonObject { })
+            }
+            
+            send(Json.encodeToString(JsonObject.serializer(), errorReport))
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to send error report")
+            false
+        }
+    }
+    
+    /**
+     * Send connection status to PC server.
+     */
+    fun sendConnectionStatus(status: String): Boolean {
+        if (!keyExchangeCompleted) {
+            Timber.w("Cannot send connection status: key exchange not completed")
+            return false
+        }
+        
+        return try {
+            val statusReport = buildJsonObject {
+                put(JSON_KEY_TYPE, MESSAGE_TYPE_CONNECTION_STATUS)
+                put("status", status)
+                put("timestamp", System.currentTimeMillis())
+            }
+            
+            send(Json.encodeToString(JsonObject.serializer(), statusReport))
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to send connection status")
+            false
         }
     }
 
