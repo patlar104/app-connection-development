@@ -1,0 +1,52 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.dll
+*.exe
+*.pdb
+*.dll.config
+
+## Certificates and Keys
+certs/
+*.crt
+*.key
+*.pem
+*.pfx
+
+## Logs
+*.log
+logs/
+
+## IDE
+.vs/
+.idea/
+*.swp
+*.swo
+*~
+
+## OS
+.DS_Store
+Thumbs.db
+
+## Build results
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+
+## NuGet
+*.nupkg
+*.snupkg
+packages/
+.nuget/
+
+## Rider
+.idea/
+*.sln.iml
+
+## Visual Studio
+.vs/
+*.user
+*.suo
