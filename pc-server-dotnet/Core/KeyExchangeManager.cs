@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Logging;
@@ -73,8 +74,8 @@ public class KeyExchangeManager
         _logger?.LogInformation("Generating RSA key pair (key size: {KeySize} bits)...", keySize);
 
         var privateKey = RSA.Create(keySize);
-        var publicKey = RSA.Create();
-        publicKey.ImportRSAPublicKey(privateKey.ExportRSAPublicKey(), out _);
+        var publicKeyParams = privateKey.ExportParameters(false);
+        var publicKey = RSA.Create(publicKeyParams);
 
         _logger?.LogInformation("RSA key pair generated successfully");
 
@@ -88,8 +89,8 @@ public class KeyExchangeManager
             throw new InvalidOperationException("RSA private key not loaded");
         }
 
-        var publicKey = RSA.Create();
-        publicKey.ImportRSAPublicKey(_rsaPrivateKey.ExportRSAPublicKey(), out _);
+        var publicKeyParams = _rsaPrivateKey.ExportParameters(false);
+        using var publicKey = RSA.Create(publicKeyParams);
 
         return publicKey.ExportRSAPublicKeyPem();
     }

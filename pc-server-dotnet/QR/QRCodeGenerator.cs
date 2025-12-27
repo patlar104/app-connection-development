@@ -61,8 +61,8 @@ public class QRCodeGenerator
         _logger.LogInformation("Connection info: {Info}", connectionInfo);
 
         // Generate QR code
-        using var qrGenerator = new QRCodeGenerator();
-        var qrData = qrGenerator.CreateQrCode(connectionInfo, QRCodeGenerator.ECCLevel.Q);
+        using var qrGenerator = new QRCoder.QRCodeGenerator();
+        var qrData = qrGenerator.CreateQrCode(connectionInfo, QRCoder.QRCodeGenerator.ECCLevel.Q);
         using var qrCode = new AsciiQRCode(qrData);
         var qrAscii = qrCode.GetGraphic(1);
 
@@ -109,25 +109,41 @@ public class QRCodeGenerator
 
     private static string ExportPrivateKeyPem(RSA rsa)
     {
-        var parameters = rsa.ExportRSAPrivateKey();
-        var builder = new StringBuilder();
-        builder.AppendLine("-----BEGIN RSA PRIVATE KEY-----");
-        builder.AppendLine(Convert.ToBase64String(
-            parameters,
-            Base64FormattingOptions.InsertLineBreaks));
-        builder.AppendLine("-----END RSA PRIVATE KEY-----");
-        return builder.ToString();
+        try
+        {
+            return rsa.ExportRSAPrivateKeyPem();
+        }
+        catch
+        {
+            // Fallback to manual export
+            var parameters = rsa.ExportRSAPrivateKey();
+            var builder = new StringBuilder();
+            builder.AppendLine("-----BEGIN RSA PRIVATE KEY-----");
+            builder.AppendLine(Convert.ToBase64String(
+                parameters,
+                Base64FormattingOptions.InsertLineBreaks));
+            builder.AppendLine("-----END RSA PRIVATE KEY-----");
+            return builder.ToString();
+        }
     }
 
     private static string ExportPublicKeyPem(RSA publicKey)
     {
-        var parameters = publicKey.ExportRSAPublicKey();
-        var builder = new StringBuilder();
-        builder.AppendLine("-----BEGIN PUBLIC KEY-----");
-        builder.AppendLine(Convert.ToBase64String(
-            parameters,
-            Base64FormattingOptions.InsertLineBreaks));
-        builder.AppendLine("-----END PUBLIC KEY-----");
-        return builder.ToString();
+        try
+        {
+            return publicKey.ExportRSAPublicKeyPem();
+        }
+        catch
+        {
+            // Fallback to manual export
+            var parameters = publicKey.ExportRSAPublicKey();
+            var builder = new StringBuilder();
+            builder.AppendLine("-----BEGIN PUBLIC KEY-----");
+            builder.AppendLine(Convert.ToBase64String(
+                parameters,
+                Base64FormattingOptions.InsertLineBreaks));
+            builder.AppendLine("-----END PUBLIC KEY-----");
+            return builder.ToString();
+        }
     }
 }

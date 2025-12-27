@@ -46,10 +46,10 @@ public class WebSocketServer
         // For now, we'll use HTTP and add HTTPS support later
         // On macOS/Linux, you may need to run with sudo or configure certificates
         var prefix = $"http://{host}:{port}/";
-        _listener.Prefixes.Add(prefix);
-
+        
         try
         {
+            _listener.Prefixes.Add(prefix);
             _listener.Start();
             _logger.LogInformation("WebSocket server running on {Prefix}", prefix);
 
@@ -84,8 +84,16 @@ public class WebSocketServer
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error handling WebSocket connection");
-            context.Response.StatusCode = 500;
-            context.Response.Close();
+            try
+            {
+                context.Response.StatusCode = 500;
+                context.Response.Close();
+            }
+            catch { }
+        }
+        finally
+        {
+            wsContext?.WebSocket?.Dispose();
         }
     }
 
