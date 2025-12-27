@@ -69,8 +69,8 @@ class AppConnectServer:
         )
         self.qr_generator.ensure_rsa_key_exists()
         
-        # Generate and display QR code
-        connection_info = self.qr_generator.generate_qr_code()
+        # Generate and display QR code in GUI popup window (secure, no file saved)
+        connection_info = self.qr_generator.display_qr_code_window()
         logger.info(f"Connection info: {connection_info}")
         
         # Initialize mDNS service
@@ -262,6 +262,17 @@ class AppConnectServer:
 
 def main():
     """Main entry point."""
+    # Set multiprocessing start method to 'spawn' on macOS for GUI compatibility
+    # This must be done before creating any Process objects
+    import multiprocessing
+    import platform
+    if platform.system() == 'Darwin':  # macOS
+        try:
+            multiprocessing.set_start_method('spawn', force=True)
+        except RuntimeError:
+            # Already set, ignore
+            pass
+    
     server = AppConnectServer()
     server.run()
 

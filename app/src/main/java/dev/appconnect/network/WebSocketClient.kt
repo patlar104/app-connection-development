@@ -15,6 +15,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import javax.net.ssl.HostnameVerifier
 import timber.log.Timber
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
@@ -27,7 +28,8 @@ import javax.net.ssl.X509TrustManager
 
 @Singleton
 class WebSocketClient @Inject constructor(
-    private val trustManager: PairedDeviceTrustManager
+    private val trustManager: PairedDeviceTrustManager,
+    private val keyExchangeManager: KeyExchangeManager
 ) {
     companion object {
         // JSON message keys
@@ -80,9 +82,6 @@ class WebSocketClient @Inject constructor(
     private var lastPort: Int? = null
     private var shouldReconnect = false
     private var reconnectAttempts = 0
-    
-    @Inject
-    private lateinit var keyExchangeManager: KeyExchangeManager
 
     fun setMessageListener(listener: (String) -> Unit) {
         messageListener = listener
@@ -109,6 +108,12 @@ class WebSocketClient @Inject constructor(
             // For OkHttp 4.x, we use the deprecated method with proper TrustManager
             @Suppress("DEPRECATION")
             clientBuilder.sslSocketFactory(sslContext.socketFactory, trustManager)
+            
+            // Disable hostname verification since we use certificate pinning via TrustManager
+            // The TrustManager verifies the certificate fingerprint, which provides security
+            // even without hostname verification. This allows connections to IP addresses
+            // that may not be in the certificate's Subject Alternative Names.
+            clientBuilder.hostnameVerifier(HostnameVerifier { _, _ -> true })
             
             val client = clientBuilder.build()
 
@@ -183,6 +188,8 @@ class WebSocketClient @Inject constructor(
                 super.onClosing(webSocket, code, reason)
                 _connectionState.value = ConnectionState.Disconnecting
                 Timber.d("WebSocket closing: $code - $reason")
+                // Note: onClosed should be called after onClosing, but if server stops abruptly,
+                // onClosed might not fire. In that case, onFailure will be called instead.
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
@@ -191,6 +198,15 @@ class WebSocketClient @Inject constructor(
                 keyExchangeCompleted = false
                 sessionEncryption = null
                 Timber.d("WebSocket closed: $code - $reason")
+                
+                // Only attempt reconnection if this was an unexpected closure
+                // Normal closures (code 1000) typically mean intentional disconnection
+                if (shouldReconnect && code != CLOSE_CODE_NORMAL) {
+                    attemptReconnection()
+                } else {
+                    // Stop reconnection attempts for normal closures or if shouldReconnect is false
+                    shouldReconnect = false
+                }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
@@ -200,8 +216,11 @@ class WebSocketClient @Inject constructor(
                 sessionEncryption = null
                 Timber.e(t, "WebSocket failure")
                 
-                // Attempt automatic reconnection
-                attemptReconnection()
+                // Attempt automatic reconnection only if we should reconnect
+                // (onFailure is called when server stops or network issues occur)
+                if (shouldReconnect) {
+                    attemptReconnection()
+                }
             }
         }
     }

@@ -89,7 +89,7 @@ fun MainScreen(viewModel: MainViewModel) {
                     modifier = Modifier.size(FAB_SIZE.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.QrCodeScanner,
+                        imageVector = Icons.Filled.QrCodeScanner,
                         contentDescription = stringResource(R.string.ui_scan_qr_code)
                     )
                 }

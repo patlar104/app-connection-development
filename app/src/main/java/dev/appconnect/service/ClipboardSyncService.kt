@@ -62,6 +62,11 @@ class ClipboardSyncService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // IMPORTANT: Call startForeground() immediately when service starts via startForegroundService()
+        // Android requires this to be called within ~5 seconds, otherwise it will crash with
+        // ForegroundServiceDidNotStartInTimeException
+        startForeground(NOTIFICATION_ID, createDefaultNotification())
+        
         when (intent?.action) {
             NotificationManager.ACTION_START_SYNC -> startSync()
             NotificationManager.ACTION_STOP_SYNC -> stopSync()
@@ -83,11 +88,14 @@ class ClipboardSyncService : Service() {
                 )
             ) {
                 Timber.w("Cannot start foreground service without POST_NOTIFICATIONS permission")
+                // Stop gracefully - startForeground was already called in onStartCommand
+                stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return
             }
         }
-        startForeground(NOTIFICATION_ID, createNotification(Transport.WEBSOCKET))
+        // Update notification to show active sync state
+        updateNotification(Transport.WEBSOCKET)
     }
 
     private fun stopSync() {
@@ -254,6 +262,17 @@ class ClipboardSyncService : Service() {
     private fun updateNotification(transport: Transport) {
         val notification = createNotification(transport)
         startForeground(NOTIFICATION_ID, notification)
+    }
+
+    private fun createDefaultNotification(): Notification {
+        // Default notification shown immediately when service starts
+        // This ensures startForeground() is called quickly to avoid crashes
+        return NotificationCompat.Builder(this, NotificationManager.CHANNEL_ID)
+            .setContentTitle(getString(R.string.notification_connected_to_pc))
+            .setContentText(getString(R.string.notification_establishing_connection))
+            .setSmallIcon(R.drawable.ic_sync_tile)
+            .setOngoing(true)
+            .build()
     }
 
     private fun createNotification(transport: Transport): Notification {

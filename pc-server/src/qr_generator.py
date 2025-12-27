@@ -6,6 +6,16 @@ from pathlib import Path
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from typing import Optional
+import multiprocessing
+import sys
+
+# Try importing Tkinter for GUI display (built-in to Python)
+try:
+    import tkinter as tk
+    from PIL import ImageTk
+    TKINTER_AVAILABLE = True
+except ImportError:
+    TKINTER_AVAILABLE = False
 
 
 class QRCodeGenerator:
@@ -54,15 +64,32 @@ class QRCodeGenerator:
         print(f"Generated RSA key pair: {self.rsa_public_key_file}")
         
     def get_public_key_base64(self) -> str:
-        """Get RSA public key as Base64 string for QR code."""
+        """
+        Get RSA public key as Base64-encoded DER bytes for QR code.
+        
+        Android's X509EncodedKeySpec expects DER-encoded bytes (raw ASN.1),
+        not PEM format. This method extracts the DER bytes from the PEM file
+        and Base64 encodes them.
+        """
         if not self.rsa_public_key_file.exists():
             self._generate_rsa_key_pair()
             
+        # Load the PEM public key file
         with open(self.rsa_public_key_file, "rb") as f:
             public_key_pem = f.read()
-            
-        # Convert PEM to Base64 (remove headers and newlines)
-        public_key_b64 = base64.b64encode(public_key_pem).decode('ascii')
+        
+        # Parse the PEM format to get the public key object
+        public_key = serialization.load_pem_public_key(public_key_pem)
+        
+        # Extract DER-encoded bytes (raw ASN.1 format, no PEM headers)
+        # This is what Android's X509EncodedKeySpec expects
+        der_bytes = public_key.public_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        
+        # Base64 encode the DER bytes (Android will decode with Base64.NO_WRAP)
+        public_key_b64 = base64.b64encode(der_bytes).decode('ascii')
         return public_key_b64
         
     def generate_connection_info_json(self) -> str:
@@ -84,24 +111,24 @@ class QRCodeGenerator:
         # Compact JSON (no spaces) to minimize QR code size
         return json.dumps(connection_info, separators=(',', ':'))
         
-    def generate_qr_code(self, output_file: Optional[Path] = None) -> str:
+    def _create_qr_image(self):
         """
-        Generate QR code image and return connection info JSON.
+        Create QR code image from connection info.
         
-        Args:
-            output_file: Optional path to save QR code image
-            
         Returns:
-            Connection info JSON string
+            Tuple of (QRCode object, PIL Image)
         """
         connection_info_json = self.generate_connection_info_json()
         
-        # Create QR code
+        # Create QR code with optimized settings for faster scanning:
+        # - box_size=4: Larger modules for easier detection at various distances
+        # - border=4: Standard quiet zone (4 modules on all sides) for better detection
+        # - ERROR_CORRECT_L: Low error correction (7% recovery) is sufficient and faster to scan
         qr = qrcode.QRCode(
             version=1,
             error_correction=qrcode.constants.ERROR_CORRECT_L,
-            box_size=2,
-            border=2,
+            box_size=4,  # Increased from 2 to 4 for better scanning at distance
+            border=4,    # Increased from 2 to 4 for standard quiet zone
         )
         qr.add_data(connection_info_json)
         qr.make(fit=True)
@@ -109,19 +136,90 @@ class QRCodeGenerator:
         # Create image
         img = qr.make_image(fill_color="black", back_color="white")
         
-        # Always save to default location if not specified
-        if output_file is None:
-            output_file = self.rsa_public_key_file.parent / "qr_code.png"
+        return qr, img
+    
+    def generate_qr_code(self, output_file: Optional[Path] = None, save_file: bool = False) -> str:
+        """
+        Generate QR code image and return connection info JSON.
         
-        img.save(output_file)
-        print(f"\nQR code saved to: {output_file}")
-        print(f"You can open this image file to scan with your Android app!\n")
+        Args:
+            output_file: Optional path to save QR code image (only used if save_file=True)
+            save_file: If True, save QR code to file (default: False for security)
+            
+        Returns:
+            Connection info JSON string
+        """
+        connection_info_json = self.generate_connection_info_json()
+        qr, img = self._create_qr_image()
         
-        # Also display in terminal using ASCII
+        # Optionally save to file (disabled by default for security)
+        if save_file:
+            if output_file is None:
+                output_file = self.rsa_public_key_file.parent / "qr_code.png"
+            img.save(output_file)
+            print(f"\nQR code saved to: {output_file}")
+        else:
+            print("\nQR code generated (not saved to file for security)")
+        
+        # Display in terminal using ASCII (informational only)
         self._print_qr_ascii(qr)
             
         return connection_info_json
+    
+    def display_qr_code_window(self) -> str:
+        """
+        Generate and display QR code in a GUI popup window (secure, no file saved).
         
+        Uses a separate process for the GUI window for cross-platform compatibility:
+        - macOS: Required for main thread compatibility
+        - Windows/Linux: Works seamlessly with multiprocessing
+        
+        Returns:
+            Connection info JSON string
+        """
+        if not TKINTER_AVAILABLE:
+            print("Warning: Tkinter not available, falling back to file-based display")
+            return self.generate_qr_code(save_file=True)
+        
+        connection_info_json = self.generate_connection_info_json()
+        qr, img = self._create_qr_image()
+        
+        # Display connection info in terminal
+        print("\n" + "=" * 50)
+        print("AppConnect Server Ready")
+        print("=" * 50)
+        print(f"Device: {self.device_name}")
+        print(f"IP: {self.ip}")
+        print(f"Port: {self.port}")
+        print(f"Fingerprint: {self.cert_fingerprint[:20]}...")
+        print("=" * 50)
+        print("QR code displayed in popup window. Scan with your Android app!")
+        print("=" * 50 + "\n")
+        
+        # Save image to a temporary in-memory format (BytesIO) for the process
+        from io import BytesIO
+        img_bytes = BytesIO()
+        img.save(img_bytes, format='PNG')
+        img_bytes.seek(0)
+        img_data = img_bytes.read()
+        
+        # Start GUI in a separate process for cross-platform compatibility
+        # - macOS: Required for main thread compatibility
+        # - Windows/Linux: Works seamlessly with multiprocessing
+        try:
+            process = multiprocessing.Process(
+                target=_show_qr_window_process,
+                args=(img_data,),
+                daemon=True
+            )
+            process.start()
+        except Exception as e:
+            print(f"Warning: Could not start GUI window process: {e}")
+            print("Falling back to file-based display...")
+            return self.generate_qr_code(save_file=True)
+        
+        return connection_info_json
+
     def _print_qr_ascii(self, qr: qrcode.QRCode) -> None:
         """Print QR code as ASCII art in terminal."""
         print("\n" + "=" * 50)
@@ -147,3 +245,62 @@ class QRCodeGenerator:
         print(f"  Fingerprint: {self.cert_fingerprint[:20]}...")
         print("=" * 50 + "\n")
 
+
+def _show_qr_window_process(img_data: bytes) -> None:
+    """
+    Display QR code window in a separate process.
+    
+    This function runs in its own process for cross-platform compatibility:
+    - macOS: Required so Tkinter can use the main thread (macOS requirement)
+    - Windows/Linux: Works seamlessly with multiprocessing spawn method
+    
+    The image data is passed as bytes to avoid pickling issues with PIL Image objects.
+    """
+    try:
+        from PIL import Image
+        import tkinter as tk
+        from PIL import ImageTk
+        from io import BytesIO
+        
+        # Load image from bytes
+        img_bytes = BytesIO(img_data)
+        img = Image.open(img_bytes)
+        
+        # Create and configure window
+        root = tk.Tk()
+        root.title("AppConnect - Scan QR Code")
+        root.resizable(False, False)
+        
+        # Convert PIL Image to PhotoImage for Tkinter
+        photo = ImageTk.PhotoImage(img)
+        
+        # Create label with QR code image
+        label = tk.Label(root, image=photo)
+        label.image = photo  # Keep a reference to prevent garbage collection
+        label.pack(padx=20, pady=20)
+        
+        # Add instruction text
+        instruction = tk.Label(
+            root,
+            text="Scan this QR code with your Android app",
+            font=("Arial", 12)
+        )
+        instruction.pack(pady=(0, 20))
+        
+        # Center window on screen
+        root.update_idletasks()
+        width = root.winfo_width()
+        height = root.winfo_height()
+        x = (root.winfo_screenwidth() // 2) - (width // 2)
+        y = (root.winfo_screenheight() // 2) - (height // 2)
+        root.geometry(f"{width}x{height}+{x}+{y}")
+        
+        # Make window stay on top initially
+        root.attributes("-topmost", True)
+        root.after(100, lambda: root.attributes("-topmost", False))
+        
+        # Start event loop (blocks until window is closed)
+        root.mainloop()
+    except Exception as e:
+        print(f"Error displaying QR code window: {e}")
+        sys.exit(1)

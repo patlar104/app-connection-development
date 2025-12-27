@@ -9,7 +9,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes
 import websockets
-from websockets.server import WebSocketServerProtocol
+from websockets.asyncio.server import ServerConnection
 from websockets.exceptions import ConnectionClosed
 
 from .encryption import EncryptionManager
@@ -42,7 +42,7 @@ class WebSocketServer:
         self.pre_shared_key = pre_shared_key
         
         # Per-connection state
-        self.connections: Dict[WebSocketServerProtocol, Dict] = {}
+        self.connections: Dict[ServerConnection, Dict] = {}
         
         # Load RSA private key (only if not using pre-shared key)
         self._rsa_private_key = None
@@ -51,17 +51,30 @@ class WebSocketServer:
         
     def _load_rsa_key(self) -> None:
         """Load RSA private key for key exchange."""
+        if not self.rsa_private_key_file.exists():
+            raise FileNotFoundError(
+                f"RSA private key file not found: {self.rsa_private_key_file}. "
+                f"Please ensure the key file exists or run the server to generate it."
+            )
+        
         try:
             with open(self.rsa_private_key_file, "rb") as f:
+                key_data = f.read()
+                if not key_data:
+                    raise ValueError(f"RSA private key file is empty: {self.rsa_private_key_file}")
+                
                 self._rsa_private_key = serialization.load_pem_private_key(
-                    f.read(),
+                    key_data,
                     password=None
                 )
-        except Exception as e:
-            logger.error(f"Failed to load RSA private key: {e}")
+                logger.info(f"Loaded RSA private key from {self.rsa_private_key_file}")
+        except FileNotFoundError:
             raise
+        except Exception as e:
+            logger.error(f"Failed to load RSA private key from {self.rsa_private_key_file}: {e}")
+            raise ValueError(f"Invalid RSA private key file: {e}") from e
             
-    async def handle_client(self, websocket: WebSocketServerProtocol, path: str) -> None:
+    async def handle_client(self, websocket: ServerConnection) -> None:
         """Handle a WebSocket client connection."""
         remote_addr = websocket.remote_address
         logger.info(f"WebSocket client connected: {remote_addr}")
@@ -91,7 +104,7 @@ class WebSocketServer:
             if websocket in self.connections:
                 del self.connections[websocket]
                 
-    async def _handle_key_exchange(self, websocket: WebSocketServerProtocol, 
+    async def _handle_key_exchange(self, websocket: ServerConnection, 
                                    connection_state: Dict) -> None:
         """Handle RSA-based key exchange or use pre-shared key."""
         # If pre-shared key is set, use it directly
@@ -117,9 +130,18 @@ class WebSocketServer:
             encrypted_key_b64 = key_exchange_data.get("encrypted_key")
             if not encrypted_key_b64:
                 raise ValueError("Missing encrypted_key in key exchange")
+            
+            # Add padding for Base64 decode (Android uses NO_WRAP which strips padding)
+            def add_padding(s: str) -> str:
+                missing_padding = len(s) % 4
+                if missing_padding:
+                    return s + '=' * (4 - missing_padding)
+                return s
                 
             # Decode and decrypt AES key
-            encrypted_key = base64.b64decode(encrypted_key_b64)
+            logger.debug(f"Received encrypted key (length: {len(encrypted_key_b64)})")
+            encrypted_key = base64.b64decode(add_padding(encrypted_key_b64))
+            logger.debug(f"Decoded encrypted key (length: {len(encrypted_key)} bytes)")
             aes_key = self._rsa_private_key.decrypt(
                 encrypted_key,
                 padding.OAEP(
@@ -128,6 +150,10 @@ class WebSocketServer:
                     label=None
                 )
             )
+            
+            # Validate decrypted AES key size (must be 32 bytes for AES-256)
+            if len(aes_key) != 32:
+                raise ValueError(f"Invalid AES key size: {len(aes_key)} bytes (expected 32)")
             
             # Initialize encryption manager with shared key
             encryption = EncryptionManager(aes_key)
@@ -144,10 +170,20 @@ class WebSocketServer:
             raise
         except Exception as e:
             logger.error(f"Key exchange failed: {e}", exc_info=True)
-            await websocket.send(json.dumps({"type": "key_exchange_ack", "status": "error", "message": str(e)}))
+            # Try to send error response to client before closing connection
+            try:
+                await websocket.send(json.dumps({
+                    "type": "key_exchange_ack", 
+                    "status": "error", 
+                    "message": str(e)
+                }))
+            except Exception:
+                # Connection may already be closed, ignore
+                pass
+            # Re-raise to close the connection (this is expected behavior on error)
             raise
             
-    async def _handle_message(self, websocket: WebSocketServerProtocol, 
+    async def _handle_message(self, websocket: ServerConnection, 
                              message: str, connection_state: Dict) -> None:
         """Handle incoming encrypted message."""
         if not connection_state["key_exchanged"]:
@@ -165,17 +201,37 @@ class WebSocketServer:
             
             logger.info(f"Received clipboard: {clipboard_item.content[:50]}...")
             
-            # Write to clipboard
-            ClipboardWriter.write_text(clipboard_item.content)
+            # Write to clipboard in executor to avoid blocking the event loop
+            # This prevents clipboard operations from causing connection timeouts
+            loop = asyncio.get_event_loop()
+            try:
+                await loop.run_in_executor(
+                    None,
+                    ClipboardWriter.write_text,
+                    clipboard_item.content
+                )
+                logger.debug("Successfully wrote to clipboard")
+            except Exception as e:
+                logger.error(f"Error writing to clipboard: {e}", exc_info=True)
+                # Continue even if clipboard write fails
             
-            # Notify callback if set
+            # Notify callback if set (callback is synchronous, run in executor to avoid blocking)
             if self.on_clipboard_received:
-                self.on_clipboard_received(clipboard_item.content)
+                try:
+                    # Run callback in executor to avoid blocking the event loop
+                    await loop.run_in_executor(
+                        None,
+                        lambda: self.on_clipboard_received(clipboard_item.content)
+                    )
+                except Exception as e:
+                    logger.error(f"Error in clipboard received callback: {e}", exc_info=True)
+                    # Continue even if callback fails
                 
         except Exception as e:
             logger.error(f"Error handling message: {e}", exc_info=True)
+            # Don't re-raise - we want to continue handling messages
             
-    async def send_clipboard(self, websocket: WebSocketServerProtocol, 
+    async def send_clipboard(self, websocket: ServerConnection, 
                             content: str) -> bool:
         """
         Send clipboard content to connected client.

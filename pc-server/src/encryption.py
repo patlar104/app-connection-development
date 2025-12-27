@@ -96,7 +96,8 @@ class EncryptionManager:
         """
         Decrypt message in format: {ivBase64}|{encryptedBase64}
         
-        Handles NO_WRAP base64 encoding from Android.
+        Handles NO_WRAP base64 encoding from Android (no padding, no line breaks).
+        Adds padding back if needed since Python's base64.decode() may require it.
         """
         parts = message.split("|")
         if len(parts) != 2:
@@ -104,9 +105,16 @@ class EncryptionManager:
             
         iv_b64, encrypted_b64 = parts
         
-        # Base64 decode (add padding if needed)
-        iv = base64.b64decode(iv_b64 + '=' * (4 - len(iv_b64) % 4))
-        encrypted = base64.b64decode(encrypted_b64 + '=' * (4 - len(encrypted_b64) % 4))
+        # Base64 decode - add padding if needed (padding length = (4 - len % 4) % 4)
+        # This handles NO_WRAP format from Android which strips padding
+        def add_padding(s: str) -> str:
+            missing_padding = len(s) % 4
+            if missing_padding:
+                return s + '=' * (4 - missing_padding)
+            return s
+        
+        iv = base64.b64decode(add_padding(iv_b64))
+        encrypted = base64.b64decode(add_padding(encrypted_b64))
         
         return self.decrypt(iv, encrypted)
         

@@ -23,6 +23,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,6 +45,10 @@ import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import timber.log.Timber
+import android.util.Size
+import android.os.Handler
+import android.os.Looper
+import java.util.concurrent.Executors
 
 // QR Scanner constants
 private const val SCANNING_FRAME_SIZE_DP = 250
@@ -64,32 +70,56 @@ fun QrScannerScreen(
     if (hasCameraPermission) {
         val scanStateRef = remember { ScanState() }
         
+        // Store camera provider and executor for cleanup
+        val cameraProviderState = remember { mutableStateOf<ProcessCameraProvider?>(null) }
+        val executorState = remember { mutableStateOf<java.util.concurrent.ExecutorService?>(null) }
+        
+        // Cleanup camera when composable is removed
+        DisposableEffect(Unit) {
+            onDispose {
+                // Unbind camera before surface is destroyed
+                cameraProviderState.value?.unbindAll()
+                executorState.value?.shutdown()
+            }
+        }
+        
         AndroidView(
             factory = { ctx ->
                 val previewView = PreviewView(ctx)
                 val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                val barcodeScanner = BarcodeScanning.getClient()
 
                 cameraProviderFuture.addListener({
                     try {
-                        val cameraProvider = cameraProviderFuture.get()
+                        val provider = cameraProviderFuture.get()
+                        cameraProviderState.value = provider
 
+                        // Configure barcode scanner to only scan QR codes for better performance
+                        val barcodeOptions = com.google.mlkit.vision.barcode.BarcodeScannerOptions.Builder()
+                            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                            .build()
+                        val qrCodeScanner = BarcodeScanning.getClient(barcodeOptions)
+
+                        // Use background executor for image analysis to avoid blocking main thread
+                        val analysisExecutor = Executors.newSingleThreadExecutor()
+                        executorState.value = analysisExecutor
+                        
                         val imageAnalysis = ImageAnalysis.Builder()
+                            .setTargetResolution(Size(1280, 720)) // Optimal resolution for QR code scanning (max 2MP)
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                             .build()
                             .also {
-                                it.setAnalyzer(ContextCompat.getMainExecutor(ctx)) { imageProxy ->
+                                it.setAnalyzer(analysisExecutor) { imageProxy ->
                                     processImageProxy(
                                         imageProxy,
-                                        barcodeScanner,
+                                        qrCodeScanner,
                                         scanStateRef,
                                         onScanSuccess
                                     )
                                 }
                             }
 
-                        cameraProvider.unbindAll()
-                        cameraProvider.bindToLifecycle(
+                        provider.unbindAll()
+                        provider.bindToLifecycle(
                             lifecycleOwner,
                             CameraSelector.DEFAULT_BACK_CAMERA,
                             Preview.Builder().build().also {
@@ -122,7 +152,7 @@ fun QrScannerScreen(
                     .padding(16.dp) // Keep 16.dp for padding, not a scanning-specific constant
             ) {
                 Icon(
-                    imageVector = Icons.Default.Close,
+                    imageVector = Icons.Filled.Close,
                     contentDescription = stringResource(R.string.ui_close),
                     tint = QRScannerOverlayWhite
                 )
@@ -181,6 +211,9 @@ private fun processImageProxy(
             imageProxy.imageInfo.rotationDegrees
         )
 
+        // Handler to post results to main thread for UI updates
+        val mainHandler = Handler(Looper.getMainLooper())
+
         barcodeScanner.process(image)
             .addOnSuccessListener { barcodes ->
                 for (barcode in barcodes) {
@@ -188,7 +221,10 @@ private fun processImageProxy(
                         if (!scanState.hasScanned) {
                             scanState.hasScanned = true
                             Timber.d("QR code scanned: ${qrData.take(QR_PREVIEW_LENGTH)}...")
-                            onScanSuccess(qrData)
+                            // Post to main thread to ensure UI updates happen on correct thread
+                            mainHandler.post {
+                                onScanSuccess(qrData)
+                            }
                         }
                     }
                 }
