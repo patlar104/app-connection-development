@@ -1,4 +1,5 @@
 using System.Net;
+using System.Threading;
 using Microsoft.Extensions.Logging;
 using AppConnectServer.Core;
 using AppConnectServer.Network;
@@ -34,8 +35,15 @@ public class Server
             Initialize();
             await StartAsync();
             
-            // Keep server running
-            await Task.Delay(-1);
+            // Keep server running - StartAsync will block until server stops
+            // The WebSocket server's StartAsync method contains the main loop
+            // So we just wait here (this should never complete unless there's an error)
+            await Task.Delay(Timeout.Infinite);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when cancellation is requested
+            _logger.LogInformation("Server shutdown requested");
         }
         catch (Exception ex)
         {
@@ -128,6 +136,9 @@ public class Server
 
         _clipboardMonitor?.Stop();
 
+        // Stop WebSocket server
+        _webSocketServer?.Stop();
+
         if (_mdnsService != null)
         {
             await _mdnsService.StopAsync();
@@ -153,9 +164,17 @@ public class Server
             content.Length > 50 ? content.Substring(0, 50) : content);
 
         // Broadcast to all connected clients
+        // Use Task.Run with proper error handling
         _ = Task.Run(async () =>
         {
-            await _webSocketServer.BroadcastClipboardAsync(content);
+            try
+            {
+                await _webSocketServer.BroadcastClipboardAsync(content);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error broadcasting clipboard change");
+            }
         });
     }
 

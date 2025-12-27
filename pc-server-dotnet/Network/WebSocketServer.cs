@@ -4,6 +4,7 @@ using System.Net.WebSockets;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using Microsoft.Extensions.Logging;
 using AppConnectServer.Core;
 using AppConnectServer.Clipboard;
@@ -34,6 +35,20 @@ public class WebSocketServer
     }
 
     public Action<string>? OnClipboardReceived { get; set; }
+    
+    public void Stop()
+    {
+        _cancellationTokenSource?.Cancel();
+        try
+        {
+            _listener?.Stop();
+            _listener?.Close();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error stopping HttpListener");
+        }
+    }
 
     public async Task StartAsync(string host, int port)
     {
@@ -44,19 +59,131 @@ public class WebSocketServer
         
         // Note: HttpListener with HTTPS requires certificate binding
         // For now, we'll use HTTP and add HTTPS support later
-        // On macOS/Linux, you may need to run with sudo or configure certificates
+        // On macOS/Linux, HttpListener may require elevated permissions for ports <= 1024
+        // For ports > 1024, it should work without sudo
+        
+        // Validate port
+        if (port <= 0 || port > 65535)
+        {
+            throw new ArgumentException($"Invalid port number: {port}. Port must be between 1 and 65535.");
+        }
+        
+        // Warn if using privileged port on Unix-like systems
+        if (port <= 1024 && (Environment.OSVersion.Platform == PlatformID.Unix || 
+                            Environment.OSVersion.Platform == PlatformID.MacOSX))
+        {
+            _logger.LogWarning(
+                "Port {Port} is a privileged port. On macOS/Linux, HttpListener may require elevated permissions. " +
+                "Consider using a port > 1024 to avoid permission issues.", port);
+        }
+        
         var prefix = $"http://{host}:{port}/";
         
         try
         {
             _listener.Prefixes.Add(prefix);
-            _listener.Start();
-            _logger.LogInformation("WebSocket server running on {Prefix}", prefix);
+            
+            // Try to start HttpListener with better error handling
+            try
+            {
+                _listener.Start();
+                _logger.LogInformation("WebSocket server running on {Prefix}", prefix);
+            }
+            catch (HttpListenerException ex)
+            {
+                _logger.LogError(ex, 
+                    "Failed to start HttpListener. This may require elevated permissions on macOS/Linux. " +
+                    "Error code: {ErrorCode}, Message: {Message}", ex.ErrorCode, ex.Message);
+                throw new InvalidOperationException(
+                    $"Cannot start HTTP server on {prefix}. " +
+                    $"On macOS/Linux, you may need to run with elevated permissions or use a port > 1024. " +
+                    $"Original error: {ex.Message}", ex);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error starting HttpListener");
+                throw;
+            }
 
+            // Accept connections in a loop
+            // Note: GetContextAsync doesn't support cancellation tokens directly,
+            // so we check cancellation between accepts
             while (!_cancellationTokenSource.Token.IsCancellationRequested)
             {
-                var context = await _listener.GetContextAsync();
-                _ = Task.Run(() => HandleContextAsync(context, _cancellationTokenSource.Token));
+                try
+                {
+                    // Accept connection (this blocks until a connection arrives)
+                    var context = await _listener.GetContextAsync();
+                    
+                    // Check if we should still process this connection
+                    if (_cancellationTokenSource.Token.IsCancellationRequested)
+                    {
+                        try
+                        {
+                            context.Response.StatusCode = 503; // Service Unavailable
+                            context.Response.Close();
+                        }
+                        catch { }
+                        break;
+                    }
+                    
+                    // Handle connection in background task with proper async/await
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await HandleContextAsync(context, _cancellationTokenSource.Token);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Error in HandleContextAsync task");
+                        }
+                    }, _cancellationTokenSource.Token);
+                }
+                catch (HttpListenerException ex)
+                {
+                    if (_cancellationTokenSource.Token.IsCancellationRequested)
+                    {
+                        // Expected when shutting down
+                        _logger.LogDebug("HttpListener stopped (shutdown requested)");
+                        break;
+                    }
+                    _logger.LogWarning(ex, "HttpListener error: {Message} (ErrorCode: {ErrorCode})", 
+                        ex.Message, ex.ErrorCode);
+                    // Continue to accept more connections
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Listener was disposed, expected during shutdown
+                    _logger.LogDebug("HttpListener was disposed");
+                    break;
+                }
+                catch (InvalidOperationException ex)
+                {
+                    if (_cancellationTokenSource.Token.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                    _logger.LogWarning(ex, "HttpListener invalid operation: {Message}", ex.Message);
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    if (_cancellationTokenSource.Token.IsCancellationRequested)
+                    {
+                        break; // Expected when shutting down
+                    }
+                    _logger.LogError(ex, "Unexpected error accepting connection: {Message}", ex.Message);
+                    // Wait a bit before trying again to avoid tight loop
+                    try
+                    {
+                        await Task.Delay(1000, _cancellationTokenSource.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                }
             }
         }
         catch (Exception ex)
@@ -64,26 +191,86 @@ public class WebSocketServer
             _logger.LogError(ex, "WebSocket server error");
             throw;
         }
+        finally
+        {
+            // Clean up HttpListener
+            try
+            {
+                _listener?.Stop();
+                _listener?.Close();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error stopping HttpListener");
+            }
+        }
     }
 
     private async Task HandleContextAsync(HttpListenerContext context, CancellationToken cancellationToken)
     {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+
         if (!context.Request.IsWebSocketRequest)
         {
-            context.Response.StatusCode = 400;
-            context.Response.Close();
+            try
+            {
+                context.Response.StatusCode = 400;
+                context.Response.Close();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Error closing non-WebSocket request");
+            }
             return;
         }
 
         WebSocketContext? wsContext = null;
         try
         {
+            // Accept WebSocket connection with proper error handling
             wsContext = await context.AcceptWebSocketAsync(null);
-            await HandleClientAsync(wsContext.WebSocket, cancellationToken);
+            
+            if (wsContext?.WebSocket != null)
+            {
+                await HandleClientAsync(wsContext.WebSocket, cancellationToken);
+            }
+        }
+        catch (HttpListenerException ex)
+        {
+            _logger.LogWarning(ex, "HttpListener error during WebSocket acceptance: {Message}", ex.Message);
+            try
+            {
+                context.Response.StatusCode = 500;
+                context.Response.Close();
+            }
+            catch { }
+        }
+        catch (WebSocketException ex)
+        {
+            _logger.LogWarning(ex, "WebSocket error during connection: {Message}", ex.Message);
+            try
+            {
+                context.Response.StatusCode = 500;
+                context.Response.Close();
+            }
+            catch { }
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Invalid operation during WebSocket acceptance: {Message}", ex.Message);
+            try
+            {
+                context.Response.StatusCode = 500;
+                context.Response.Close();
+            }
+            catch { }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error handling WebSocket connection");
+            _logger.LogError(ex, "Unexpected error handling WebSocket connection");
             try
             {
                 context.Response.StatusCode = 500;
@@ -93,7 +280,14 @@ public class WebSocketServer
         }
         finally
         {
-            wsContext?.WebSocket?.Dispose();
+            try
+            {
+                wsContext?.WebSocket?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Error disposing WebSocket");
+            }
         }
     }
 
